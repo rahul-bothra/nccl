@@ -7,7 +7,6 @@
 #include "nccl.h"
 #include "channel.h"
 #include "nvmlwrap.h"
-#include "gdrwrap.h"
 #include "bootstrap.h"
 #include "transport.h"
 #include "group.h"
@@ -67,20 +66,6 @@ ncclResult_t initNet() {
   return ncclSuccess;
 }
 
-// GDRCOPY support: Off by default
-NCCL_PARAM(GdrCopyEnable, "GDRCOPY_ENABLE", 0);
-
-// GDRCOPY support
-gdr_t ncclGdrCopy = NULL;
-
-ncclResult_t initGdrCopy() {
-  if (ncclParamGdrCopyEnable() == 1) {
-    ncclGdrCopy = ncclGdrInit();
-  }
-  return ncclSuccess;
-}
-
-
 pthread_mutex_t initLock = PTHREAD_MUTEX_INITIALIZER;
 static bool initialized = false;
 static size_t maxLocalSizeBytes = 0;
@@ -89,7 +74,6 @@ static ncclResult_t ncclInit() {
   pthread_mutex_lock(&initLock);
   if (!initialized) {
     initEnv();
-    initGdrCopy();
     maxLocalSizeBytes = ncclKernMaxLocalSize();
     NCCLCHECK(initNet());
     INFO(NCCL_INIT, "Using network %s", ncclNetName());
@@ -292,8 +276,6 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   info->shmDev = statbuf.st_dev;
 
   info->busId = comm->busId;
-
-  NCCLCHECK(ncclGpuGdrSupport(&info->gdrSupport));
   return ncclSuccess;
 }
 

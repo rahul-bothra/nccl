@@ -301,56 +301,6 @@ compare:
   return ncclSuccess;
 }
 
-NCCL_PARAM(NetGdrRead, "NET_GDR_READ", -2);
-int ncclTopoUserGdrLevel = -1;
-
-ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int64_t busId, int netDev, int read, int* useGdr) {
-  *useGdr = 0;
-
-  // Get GPU and NET
-  int n, g;
-  NCCLCHECK(ncclTopoIdToIndex(system, NET, netDev, &n));
-  struct ncclTopoNode* net = system->nodes[NET].nodes+n;
-  NCCLCHECK(ncclTopoIdToIndex(system, GPU, busId, &g));
-  struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
-
-  // Check that both the NIC and GPUs support it
-  if (net->net.gdrSupport == 0) return ncclSuccess;
-  if (gpu->gpu.gdrSupport == 0) return ncclSuccess;
-
-  if (read) { // For reads (sends) only enable under certain conditions
-    int gdrReadParam = ncclParamNetGdrRead();
-    if (gdrReadParam == 0) return ncclSuccess;
-    if (gdrReadParam < 0) {
-      int nvlink = 0;
-      // Since we don't know whether there are other communicators,
-      // it's better to keep things local if we have a single GPU.
-      if (system->nodes[GPU].count == 1) nvlink = 1;
-      for (int i=0; i<system->nodes[GPU].count; i++) {
-        if (i == g) continue;
-        if (gpu->paths[GPU][i].type == PATH_NVL) {
-          nvlink = 1;
-          break;
-        }
-      }
-      if (!nvlink) return ncclSuccess;
-    }
-  }
-
-  // Check if we are close enough that it makes sense to enable GDR
-  int netGdrLevel = PATH_PXB;
-  NCCLCHECK(ncclGetLevel(&ncclTopoUserGdrLevel, NULL, "NCCL_NET_GDR_LEVEL"));
-  if (ncclTopoUserGdrLevel != -2) netGdrLevel = ncclTopoUserGdrLevel;
-  int distance = gpu->paths[NET][n].type;
-  if (distance > netGdrLevel) {
-    INFO(NCCL_NET,"GPU Direct RDMA Disabled for GPU %lx / HCA %d (distance %d > %d)", busId, netDev, distance, netGdrLevel);
-    return ncclSuccess;
-  }
-
-  *useGdr = 1;
-  INFO(NCCL_NET,"GPU Direct RDMA Enabled for GPU %lx / HCA %d (distance %d <= %d), read %d", busId, netDev, distance, netGdrLevel, read);
-  return ncclSuccess;
-}
 
 ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclPeerInfo* peerInfos) {
   // Precompute paths between GPUs/NICs.
@@ -402,15 +352,10 @@ ncclResult_t ncclTopoComputePaths(struct ncclTopoSystem* system, struct ncclPeer
 
     for (int g=0; g<system->nodes[GPU].count; g++) {
       // Update path when we dont want to / can't use GPU Direct RDMA.
-      int gdr;
-      NCCLCHECK(ncclTopoCheckGdr(system, system->nodes[GPU].nodes[g].id, netNode->id, 0, &gdr));
-      if (gdr == 0) {
-        // We cannot use GPU Direct RDMA, divert all traffic through the CPU local to the GPU
-        int localCpu;
-        NCCLCHECK(getLocalCpu(system, g, &localCpu));
-        NCCLCHECK(addCpuStep(system, localCpu, NET, n, GPU, g));
-        NCCLCHECK(addCpuStep(system, localCpu, GPU, g, NET, n));
-      }
+      int localCpu;
+      NCCLCHECK(getLocalCpu(system, g, &localCpu));
+      NCCLCHECK(addCpuStep(system, localCpu, NET, n, GPU, g));
+      NCCLCHECK(addCpuStep(system, localCpu, GPU, g, NET, n));
     }
   }
   return ncclSuccess;

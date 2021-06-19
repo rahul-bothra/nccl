@@ -6,7 +6,6 @@
 
 #include "enqueue.h"
 #include "argcheck.h"
-#include "gdrwrap.h"
 
 // Only generate inline kernels for LL
 #define NCCL_FUNC5(func, algo, redop, dtype) \
@@ -162,20 +161,6 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
       }
       // As we inline the first coll directly, we can free it immediately.
       if (elem->funcIndex != FUNC_INDEX_P2P) elem->active = 0;
-    }
-
-    if (channel->gdrMemDesc) {
-      // GDRCOPY support
-      uint64_t first = (channel->workFifoTail-channel->workCount)%NCCL_MAX_OPS;
-      uint64_t nelems = channel->workCount;
-      TRACE(NCCL_INIT, "GDRCOPY : copy workFifo %p to %p first %ld nelems %zi",
-            channel->workFifo, channel->workFifoGdr, first, nelems);
-
-      for (int i = 0; i < nelems; i++) {
-        int elem = (first+i) % NCCL_MAX_OPS;
-        // Copy Host workFifo to CUDA workFifo via the GDRCOPY mapping
-        NCCLCHECK(ncclGdrCudaCopy(channel->gdrMemDesc, channel->workFifoGdr+elem, channel->workFifo+elem, 1));
-      }
     }
   }
 
