@@ -6,11 +6,11 @@
 .PHONY : all clean
 
 default : build
-build : debian.build txz.build
+build : debian.build
 
 BUILDDIR ?= $(abspath ../build)
 ABSBUILDDIR := $(abspath $(BUILDDIR))
-TARGETS := debian txz
+TARGETS := debian
 all:   ${TARGETS:%=%.build}
 prep:  ${TARGETS:%=%.prep}
 build: ${TARGETS:%=%.build}
