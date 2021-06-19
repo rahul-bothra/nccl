@@ -93,10 +93,8 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
 
   for (int coll=0; coll<NCCL_NUM_FUNCTIONS; coll++) {
     int nsteps = coll == ncclFuncAllReduce ? 2*(nRanks-1) :
-      coll == ncclFuncReduceScatter || coll == ncclFuncAllGather ? nRanks-1 :
       nRanks;
     int nInterSteps = coll == ncclFuncAllReduce ? 2*(nNodes-1) :
-      coll == ncclFuncReduceScatter || coll == ncclFuncAllGather ? nNodes-1 :
       nNodes;
 
     for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) {
@@ -119,7 +117,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
         float interLat = hwLat[NCCL_HW_NET][a][p];
         if (a == NCCL_ALGO_RING) {
           float lat = hwLat[hw[a]][a][p];
-          if ((coll == ncclFuncReduce || coll == ncclFuncBroadcast)) {
+          if (coll == ncclFuncReduce) {
             if (ringGraph->sameChannels) {
               comm->latencies[coll][a][p] += lat;
             } else {

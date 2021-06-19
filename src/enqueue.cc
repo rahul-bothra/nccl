@@ -26,16 +26,6 @@
   (void*)NCCL_FUNC4(func, redop, half), \
   (void*)NCCL_FUNC4(func, redop, float), \
   (void*)NCCL_FUNC4(func, redop, double)
-#define NCCL_FUNCS3B(func, redop) \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t), \
-  (void*)NCCL_FUNC4(func, redop, int8_t)
 
 // Must be consistent with ncclRedOp_t -- but we only generate kernel for sums.
 #define NCCL_FUNCS2A(func) \
@@ -43,19 +33,10 @@
   NCCL_FUNCS3A(func, Sum), \
   NCCL_FUNCS3A(func, Sum), \
   NCCL_FUNCS3A(func, Sum)
-#define NCCL_FUNCS2B(func) \
-  NCCL_FUNCS3B(func, Sum), \
-  NCCL_FUNCS3B(func, Sum), \
-  NCCL_FUNCS3B(func, Sum), \
-  NCCL_FUNCS3B(func, Sum)
 
 // Must be consistent with the ncclFuncSet enum
 static void* const ncclKerns[1+NCCL_NUM_FUNCTIONS*ncclNumOps*ncclNumTypes*NCCL_NUM_ALGORITHMS*NCCL_NUM_PROTOCOLS] = {
-  (void*)NCCL_KERN_NAME(SendRecv, RING, SIMPLE, Sum, int8_t),
-  NCCL_FUNCS2B(Broadcast),
   NCCL_FUNCS2A(Reduce),
-  NCCL_FUNCS2B(AllGather),
-  NCCL_FUNCS2A(ReduceScatter),
   NCCL_FUNCS2A(AllReduce)
 };
 
@@ -371,13 +352,8 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info) {
 
 static ncclResult_t getPatternInfo(struct ncclInfo* info) {
   switch (info->coll) {
-    case ncclFuncBroadcast:
-      info->pattern = info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeDown : ncclPatternPipelineFrom; break;
     case ncclFuncReduce:
       info->pattern = info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUp : ncclPatternPipelineTo; break;
-    case ncclFuncReduceScatter:
-    case ncclFuncAllGather:
-      info->pattern = ncclPatternRing; break;
     case ncclFuncAllReduce:
       info->pattern = info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUpDown : ncclPatternRingTwice; break;
     default:
