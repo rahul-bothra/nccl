@@ -38,7 +38,7 @@ std::chrono::high_resolution_clock::time_point ncclEpoch;
 
 const char* ncclFuncStr[NCCL_NUM_FUNCTIONS] = { "Broadcast", "Reduce", "AllGather", "ReduceScatter", "AllReduce" };
 const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS] = { "Tree", "Ring" };
-const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = { "LL", "LL128", "Simple" };
+const char* ncclProtoStr[NCCL_NUM_PROTOCOLS] = { "Simple" };
 
 NCCL_PARAM(GroupCudaStream, "GROUP_CUDA_STREAM", NCCL_GROUP_CUDA_STREAM);
 
@@ -372,20 +372,16 @@ ncclResult_t ncclCommSetIntra(struct ncclComm* comm, int rank, int ranks, struct
   return ncclSuccess;
 }
 
-#define DEFAULT_LL_BUFFSIZE (NCCL_LL_LINES_PER_THREAD*NCCL_LL_MAX_NTHREADS*NCCL_STEPS*sizeof(union ncclLLFifoLine))
-#define DEFAULT_LL128_BUFFSIZE (NCCL_LL128_ELEMS_PER_THREAD*NCCL_LL128_MAX_NTHREADS*NCCL_STEPS*sizeof(uint64_t))
 #define DEFAULT_BUFFSIZE (1 << 22) /* 4MiB */
 #define DEFAULT_BUFFSIZE_ARM (1 << 20) /* 1MiB */
 NCCL_PARAM(BuffSize, "BUFFSIZE", -2);
-NCCL_PARAM(LlBuffSize, "LL_BUFFSIZE", -2);
-NCCL_PARAM(Ll128BuffSize, "LL128_BUFFSIZE", -2);
 
 static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
   int cpuArch, cpuVendor, cpuModel;
   NCCLCHECK(ncclTopoCpuType(comm->topo, &cpuArch, &cpuVendor, &cpuModel));
 
-  int64_t envs[NCCL_NUM_PROTOCOLS] = { ncclParamLlBuffSize(), ncclParamLl128BuffSize(), ncclParamBuffSize() };
-  int defaults[NCCL_NUM_PROTOCOLS] = { DEFAULT_LL_BUFFSIZE, DEFAULT_LL128_BUFFSIZE, DEFAULT_BUFFSIZE };
+  int64_t envs[NCCL_NUM_PROTOCOLS] = { ncclParamBuffSize() };
+  int defaults[NCCL_NUM_PROTOCOLS] = { DEFAULT_BUFFSIZE };
 
   if (cpuArch == NCCL_TOPO_CPU_ARCH_ARM) defaults[NCCL_PROTO_SIMPLE] = DEFAULT_BUFFSIZE_ARM;
 

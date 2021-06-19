@@ -20,10 +20,8 @@ extern const char* ncclFuncStr[NCCL_NUM_FUNCTIONS];
 #define NCCL_ALGO_RING 1
 extern const char* ncclAlgoStr[NCCL_NUM_ALGORITHMS];
 
-#define NCCL_NUM_PROTOCOLS 3 // Simple/LL/LL128
-#define NCCL_PROTO_LL 0
-#define NCCL_PROTO_LL128 1
-#define NCCL_PROTO_SIMPLE 2
+#define NCCL_NUM_PROTOCOLS 1 // Simple
+#define NCCL_PROTO_SIMPLE 0
 extern const char* ncclProtoStr[NCCL_NUM_PROTOCOLS];
 
 #define NCCL_MAX_OPS 2048
@@ -48,32 +46,6 @@ union ncclLLFifoLine {
 #define MAXCHANNELS 32
 #define NCCL_MAX_NTHREADS 640
 #define NCCL_SIMPLE_MAX_NTHREADS 512
-#define NCCL_LL_MAX_NTHREADS 512
-#define NCCL_LL_LINES_PER_THREAD 8
-#ifdef TEST_LL_CLEANUP
-#define NCCL_LL_CLEAN_MASK 0x078 // Set to 0x100 to disable cleanup
-#define NCCL_LL_FLAG_MAX   0x100
-#define NCCL_LL_FLAG(a) ((uint32_t)((a) % NCCL_LL_FLAG_MAX))
-#else
-#define NCCL_LL_CLEAN_MASK 0x7ffffff8
-#define NCCL_LL_FLAG(a) ((uint32_t)(a))
-#endif
-// Make sure the clean mask will last for at least NCCL_NSTEPS
-static_assert(NCCL_LL_CLEAN_MASK % NCCL_STEPS == 0, "Invalid NCCL_LL_CLEAN_MASK value");
-
-#define NCCL_LL128_LINESIZE 128
-#define NCCL_LL128_LINEELEMS (NCCL_LL128_LINESIZE/sizeof(uint64_t))
-#define NCCL_LL128_DATAELEMS (NCCL_LL128_LINEELEMS-1)
-
-#define NCCL_LL128_MAX_NTHREADS 640
-#define NCCL_LL128_ELEMS_PER_THREAD 120
-
-// Receiving from up to 3 sources is more compute intensive than sending
-// to 3 dests. Use 70% for reduce and 30% for bcast.
-#define NCCL_LL128_SPLIT(nt) ((nt*7/(10*32))*32)
-
-#define NCCL_LL128_SHMEM_ELEMS_PER_THREAD 8
-#define NCCL_LL128_SHMEM_SIZE (NCCL_LL128_SHMEM_ELEMS_PER_THREAD*NCCL_LL128_MAX_NTHREADS)
 
 #define NCCL_DIRECT_GPU 0x01
 #define NCCL_DIRECT_NIC 0x10

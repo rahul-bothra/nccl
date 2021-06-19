@@ -297,41 +297,20 @@ ncclResult_t netSendProxy(struct ncclProxyArgs* args) {
         int buffSlot = (sub->base+sub->transmitted)%NCCL_STEPS;
         volatile int* sizesFifo = resources->recvMem->sizesFifo;
         volatile uint64_t* recvTail = &resources->recvMem->tail;
-        if (sizesFifo[buffSlot] != -1 && ((*recvTail > (sub->base+sub->transmitted)) || p == NCCL_PROTO_LL)) {
+        if (sizesFifo[buffSlot] != -1 && (*recvTail > (sub->base+sub->transmitted))) {
           // We have something to receive, let's check if it's completely ready.
           int size = sizesFifo[buffSlot];
           char* buff = resources->shared ? (char*)resources->recvMem->ptrsFifo[buffSlot] : localBuff+buffSlot*stepSize;
-          int ready = 1;
-          if (p == NCCL_PROTO_LL128) {
-            uint64_t flag = sub->base+sub->transmitted+1;
-            int nFifoLines = DIVUP(sizesFifo[buffSlot], sizeof(uint64_t)*NCCL_LL128_LINEELEMS);
-            volatile uint64_t* lines = (volatile uint64_t*)buff;
-            ready = 1;
-            for (int i=0; i<nFifoLines; i++) {
-              if (lines[i*NCCL_LL128_LINEELEMS+NCCL_LL128_DATAELEMS] != flag) { ready = 0; break; }
-            }
-          } else if (p == NCCL_PROTO_LL) {
-            uint32_t flag = NCCL_LL_FLAG(sub->base+sub->transmitted+1);
-            int nFifoLines = DIVUP(size, sizeof(union ncclLLFifoLine));
-            union ncclLLFifoLine* lines = (union ncclLLFifoLine*)buff;
-            for (int i=0; i<nFifoLines; i++) {
-              volatile uint32_t *f1 = &lines[i].flag1;
-              volatile uint32_t *f2 = &lines[i].flag2;
-              if (f1[0] != flag || f2[0] != flag) { ready = 0; break; }
-            }
-          }
-          if (ready) {
-            // Data is ready, try to send.
-            NCCLCHECK(ncclNetIsend(resources->netSendComm, buff, size, mhandle, sub->requests+buffSlot));
-            if (sub->requests[buffSlot] != NULL) {
-              TRACE(NCCL_NET, "sendProxy [%ld/%d] Isend (LL) posted, req %p", sub->transmitted, buffSlot, sub->requests[buffSlot]);
-              sizesFifo[buffSlot] = -1;
-              // Make sure size is reset to zero before we update the head.
-              __sync_synchronize();
-              sub->transmitted += args->sliceSteps;
-              args->idle = 0;
-              continue;
-            }
+          // Data is ready, try to send.
+          NCCLCHECK(ncclNetIsend(resources->netSendComm, buff, size, mhandle, sub->requests+buffSlot));
+          if (sub->requests[buffSlot] != NULL) {
+            TRACE(NCCL_NET, "sendProxy [%ld/%d] Isend (LL) posted, req %p", sub->transmitted, buffSlot, sub->requests[buffSlot]);
+            sizesFifo[buffSlot] = -1;
+            // Make sure size is reset to zero before we update the head.
+            __sync_synchronize();
+            sub->transmitted += args->sliceSteps;
+            args->idle = 0;
+            continue;
           }
         }
       }

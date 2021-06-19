@@ -11,8 +11,6 @@
 __device__ struct ncclShmemData* ncclShmem;
 
 #define NCCL_FUNC5(func, algo, redop, type) \
-  NCCL_FUNC_NAME(func, algo, LL,     redop, type), \
-  NCCL_FUNC_NAME(func, algo, LL128,  redop, type), \
   NCCL_FUNC_NAME(func, algo, SIMPLE, redop, type)
 
 #define NCCL_FUNC4(func, redop, type) \

@@ -25,9 +25,7 @@
   extern __global__ void NCCL_KERN_NAME(func, algo, proto, redop, type)(struct ncclWorkElem c); \
 
 #define DECL4(func, algo, redop, type) \
-  DECL5(func, algo, SIMPLE, redop, type) \
-  DECL5(func, algo, LL,     redop, type) \
-  DECL5(func, algo, LL128,  redop, type)
+  DECL5(func, algo, SIMPLE, redop, type)
 
 #define DECL3(func, redop, type) \
   DECL4(func, RING,    redop, type) \

@@ -63,7 +63,6 @@ struct ncclShmemPtrs {
 
 struct ncclShmemData {
   union {
-    volatile uint64_t data[NCCL_LL128_SHMEM_SIZE];
     struct ncclShmemPtrs ptrs[NCCL_MAX_GROUPS];
   };
   struct ncclWork localWork;
@@ -126,10 +125,8 @@ __device__ void NCCL_FUNC_NAME(func, algo, proto, redop, type)(struct ncclWorkEl
 
 // Only generate inline kernels for LL
 #define IMPL_COLL4(func, algo, redop, type, ncclType) \
-  IMPL_COLL_FUNC(func, algo, LL,     redop, type) \
-  IMPL_COLL_FUNC(func, algo, LL128,  redop, type) \
   IMPL_COLL_FUNC(func, algo, SIMPLE, redop, type) \
-  IMPL_COLL_KERN(func, algo, LL,     redop, type, FUNC_INDEX(ncclFunc##func, nccl##redop, ncclType, NCCL_ALGO_##algo, NCCL_PROTO_LL)) \
+  IMPL_COLL_KERN(func, algo, SIMPLE,     redop, type, FUNC_INDEX(ncclFunc##func, nccl##redop, ncclType, NCCL_ALGO_##algo, NCCL_PROTO_SIMPLE)) \
 
 #define IMPL_COLL3(func, redop, type, ncclType) \
   IMPL_COLL4(func, TREE,    redop, type, ncclType) \

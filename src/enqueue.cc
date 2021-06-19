@@ -9,9 +9,7 @@
 
 // Only generate inline kernels for LL
 #define NCCL_FUNC5(func, algo, redop, dtype) \
-  (void*)NCCL_KERN_NAME(func, algo, LL, redop, dtype), \
-  (void*)NCCL_KERN_NAME(func, algo, LL, redop, dtype), \
-  (void*)NCCL_KERN_NAME(func, algo, LL, redop, dtype)
+  (void*)NCCL_KERN_NAME(func, algo, SIMPLE, redop, dtype)
 
 #define NCCL_FUNC4(func, redop, type) \
   (void*)NCCL_FUNC5(func, TREE,    redop, type), \
@@ -442,26 +440,10 @@ static ncclResult_t computeColl(struct ncclInfo* info /* input */, struct ncclWo
     }
     // Use lastChunkSize as chunkSize
     work->coll.lastChunkSize = chunkSize / ncclTypeSize(info->datatype);
-  } else if (info->protocol == NCCL_PROTO_LL) {
-    const ssize_t sliceSize = stepSize*sizeof(uint64_t)/sizeof(union ncclLLFifoLine);
-    const ssize_t loopSize = info->nChannels*info->nchunksPerLoop*(ssize_t)sliceSize;
-    work->coll.lastChunkSize = DIVUP((info->nBytes-(info->nBytes/loopSize)*loopSize), info->nChannels*info->nchunksPerLoop);
-    ALIGN_SIZE(work->coll.lastChunkSize, info->nThreads*sizeof(uint64_t));
-    work->coll.lastChunkSize /= ncclTypeSize(info->datatype);
-  } else if (info->algorithm == NCCL_ALGO_TREE && info->protocol == NCCL_PROTO_LL128) {
-    int nNodes = info->comm->nNodes;
-    float ppn = info->comm->nRanks / (float)nNodes;
-    float nstepsLL128 = 1+log2i(nNodes) + 0.1*ppn;
-    while (info->nBytes / (info->nChannels*chunkSize) < nstepsLL128*64/ppn && chunkSize > 131072) chunkSize /= 2;
-    while (info->nBytes / (info->nChannels*chunkSize) < nstepsLL128*16/ppn && chunkSize > 32768) chunkSize /= 2;
-    // Use lastChunkSize as chunkSize
-    work->coll.lastChunkSize = chunkSize*NCCL_LL128_DATAELEMS/(NCCL_LL128_LINEELEMS*ncclTypeSize(info->datatype));
   }
 
   // Compute nSteps for proxies
   int chunkEffectiveSize = chunkSize;
-  if (info->protocol == NCCL_PROTO_LL) chunkEffectiveSize /= 2;
-  if (info->protocol == NCCL_PROTO_LL128) chunkEffectiveSize = (chunkSize / NCCL_LL128_LINEELEMS) * NCCL_LL128_DATAELEMS;
   //if (info->comm->rank == 0) printf("Coll %d, size %ld -> %dx%d, chunkSize %d (algo %d proto%d)\n", info->coll, info->nBytes, info->nChannels, info->nThreads, chunkSize, info->algorithm, info->protocol);
   int nLoops = (int)(DIVUP(info->nBytes, (((size_t)(info->nChannels))*info->nchunksPerLoop*chunkEffectiveSize)));
   proxyArgs->subs[0].nsteps = info->nstepsPerLoop * nLoops * chunkSteps;
@@ -558,7 +540,7 @@ static ncclResult_t ncclEnqueueCollKernel(ncclComm_t comm, struct ncclQueueElem*
   return ncclSuccess;
 }
 
-#define NCCL_MIN_CHANNEL_SIZE (NCCL_LL_THREAD_THRESHOLD*64)
+#define NCCL_MIN_CHANNEL_SIZE (8*64)
 #define NCCL_AGG_CHANNEL_SIZE (1LL << 21) /* 2 MiB, ideal per-channel size to fully utilize bandwidth */
 
 ncclResult_t ncclSetupAsyncKernels(ncclComm_t comm) {
