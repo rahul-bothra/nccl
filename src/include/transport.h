@@ -13,10 +13,9 @@
 #include "core.h"
 #include "proxy.h"
 
-#define NTRANSPORTS 3
-#define TRANSPORT_P2P 0
-#define TRANSPORT_SHM 1
-#define TRANSPORT_NET 2
+#define NTRANSPORTS 2
+#define TRANSPORT_SHM 0
+#define TRANSPORT_NET 1
 
 extern struct ncclTransport ncclTransports[];
 

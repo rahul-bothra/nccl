@@ -8,12 +8,10 @@
 #include "info.h"
 #include "bootstrap.h"
 
-extern struct ncclTransport p2pTransport;
 extern struct ncclTransport shmTransport;
 extern struct ncclTransport netTransport;
 
 struct ncclTransport ncclTransports[NTRANSPORTS] = {
-  p2pTransport,
   shmTransport,
   netTransport,
 };
