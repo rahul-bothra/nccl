@@ -103,12 +103,8 @@ ncclResult_t initNet() {
 
   NCCLCHECK(initNetPlugin(&ncclNet, &ncclCollNet));
   if (ncclNet != NULL) return ncclSuccess;
-  if (initNet(&ncclNetIb) == ncclSuccess) {
-    ncclNet = &ncclNetIb;
-  } else {
-    NCCLCHECK(initNet(&ncclNetSocket));
-    ncclNet = &ncclNetSocket;
-  }
+  NCCLCHECK(initNet(&ncclNetSocket));
+  ncclNet = &ncclNetSocket;
   return ncclSuccess;
 }
 

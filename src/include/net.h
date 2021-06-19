@@ -73,7 +73,6 @@ cleanup1:
   return ncclSuccess;
 }
 
-extern ncclNet_t ncclNetIb;
 extern ncclNet_t ncclNetSocket;
 
 #endif
