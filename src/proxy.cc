@@ -465,8 +465,7 @@ ncclResult_t ncclProxySharedBuffersInit(struct ncclComm* comm, int cuda, int* si
     int p2pnChannels = 1;
     while (p2pnChannels < comm->nChannels) p2pnChannels *= 2;
     int p2pSize = 2*p2pnChannels*NCCL_MAX_WORK_ELEMENTS*comm->buffSizes[NCCL_PROTO_SIMPLE]/SENDRECV_SLICEFACTOR;
-    int collNetSize = 2*comm->nChannels*comm->buffSizes[NCCL_PROTO_SIMPLE];
-    state->size = std::max(p2pSize, collNetSize);
+    state->size = p2pSize;
   }
 
   *size = state->size;
@@ -489,15 +488,7 @@ ncclResult_t ncclProxySharedBuffersGetP2p(struct ncclComm* comm, int cuda, int t
   *ptr = buff + slotSize * globalSlot;
   return ncclSuccess;
 }
-ncclResult_t ncclProxySharedBuffersGetCollNet(struct ncclComm* comm, int cuda, int type, int slot, int channel, char** ptr) {
-  struct ncclProxySharedBuffers* state = &comm->proxyState.sharedBuffs;
-  // Use different pools for different channels.
-  char* buff = cuda ? state->cudaBuff : state->hostBuff;
-  int slotSize = comm->buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS;
-  int globalSlot = (type*NCCL_STEPS+slot)*comm->nChannels+channel;
-  *ptr = buff + slotSize * globalSlot;
-  return ncclSuccess;
-}
+
 
 ncclResult_t ncclProxySharedBuffersDestroy(struct ncclComm* comm) {
   struct ncclProxySharedBuffers* state = &comm->proxyState.sharedBuffs;

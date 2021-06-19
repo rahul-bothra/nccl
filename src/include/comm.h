@@ -139,9 +139,6 @@ struct ncclComm {
   pthread_t proxyThread;
   struct ncclProxyState proxyState;
 
-  // Whether this communicator uses collNet
-  int collNetSupport;
-
   // Store info of async operations
   struct ncclInfo* asyncOps;
   int asyncOpCount;

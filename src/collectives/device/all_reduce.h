@@ -197,86 +197,6 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE, FUNC, T
 };
 
 template<class FUNC, typename T, int UNROLL>
-class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_COLLNET, NCCL_PROTO_SIMPLE, FUNC, T, UNROLL> {
-#define COLLNET_COPY_THREADS 96
-  public:
-  __device__ void run(struct ncclWorkElem* args) {
-    const int tid = threadIdx.x;
-    //const int nthreads = args->nThreads-3*WARP_SIZE;
-    const int bid = args->coll.bid;
-    const int nChannels = args->coll.nChannels;
-    struct ncclDevComm* comm = args->comm;
-    struct ncclChannel* channel = comm->channels+blockIdx.x;
-    struct ncclDirect* tree = &channel->collTree;
-    const int stepSize = comm->buffSizes[NCCL_PROTO_SIMPLE] / (sizeof(T)*NCCL_STEPS);
-    int chunkSize = args->coll.lastChunkSize;
-    const ssize_t size = args->coll.count;
-    const ssize_t loopSize = nChannels*tree->nHeads*chunkSize;
-
-    // Compute pointers
-    const T * __restrict__ thisInput = (const T*)args->sendbuff;
-    T * __restrict__ thisOutput = (T*)args->recvbuff;
-
-    const int hasUp = (tree->up[0] >= 0) ? 1 : 0;
-    const int hasDn = (tree->down[0] >= 0) ? 1 : 0;
-    const int nThreadsScatter = (hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 3*COLLNET_COPY_THREADS : 0;
-    const int nThreadsGather  = (hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 2*COLLNET_COPY_THREADS : 0;
-    const int nThreadsBcast   = (hasUp && hasDn) ? COLLNET_COPY_THREADS : hasUp ? 0 : 2*COLLNET_COPY_THREADS;
-    // Gather does not need sync threads, sparing one more warp for reduce
-    const int nThreadsReduce = NCCL_SIMPLE_MAX_NTHREADS + WARP_SIZE - nThreadsScatter - nThreadsGather - nThreadsBcast;
-    const int tidStartBcast = nThreadsGather;
-    const int tidStartScatter = tidStartBcast + nThreadsBcast + WARP_SIZE;
-    const int tidStartReduce = tidStartScatter + nThreadsScatter + WARP_SIZE;
-
-    if (tid >= tidStartScatter && tid < tidStartReduce && hasUp) {
-      // Scatter
-      ncclPrimitives<UNROLL, 1, 1, T, 0, NCCL_MAX_DIRECT_ARITY, 0, FUNC>
-        prims(tid-tidStartScatter, nThreadsScatter, NULL, tree->up, NULL, stepSize, channel, comm, ncclShmem->ptrs, 4);
-      for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
-        ssize_t offset = gridOffset + bid*tree->nHeads*chunkSize;
-        int nelem = min(tree->nHeads*chunkSize, size-offset);
-        prims.scatter(thisInput+offset, nelem, chunkSize, tree->headRank, tree->shift);
-      }
-    } else if (tid >= tidStartReduce && tree->out != -1) {
-      // Reduce, send to network
-      ncclPrimitives<UNROLL, 1, 1, T, NCCL_MAX_DIRECT_ARITY, 1, 0, FUNC>
-        prims(tid-tidStartReduce, nThreadsReduce, tree->down, &tree->out, NULL, stepSize, channel, comm, ncclShmem->ptrs, 6);
-      for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
-        ssize_t offset = gridOffset + (bid*tree->nHeads+tree->headRank)*chunkSize;
-        int nelem = min(chunkSize, size-offset);
-        if (hasDn) {
-          prims.recvReduceSend(thisInput+offset, nelem);
-        } else {
-          prims.send(thisInput+offset, nelem);
-        }
-      }
-    } else if (tid < tidStartBcast && hasUp) {
-      // Gather
-      ncclPrimitives<UNROLL, 1, 1, T, NCCL_MAX_DIRECT_ARITY, 0, 0, FUNC>
-        prims(tid, nThreadsGather, tree->up, NULL, thisOutput, stepSize, channel, comm, ncclShmem->ptrs, 0);
-      for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
-        ssize_t offset = gridOffset + bid*tree->nHeads*chunkSize;
-        int nelem = min(tree->nHeads*chunkSize, size-offset);
-        prims.gather(thisOutput+offset, nelem, chunkSize, tree->headRank, tree->shift);
-      }
-    } else if (tid >= tidStartBcast && tid < tidStartScatter && tree->out != -1) {
-      // Recv from network, broadcast
-      ncclPrimitives<UNROLL, 1, 1, T, 1, NCCL_MAX_DIRECT_ARITY, 0, FUNC>
-        prims(tid-tidStartBcast, nThreadsBcast, &tree->out, tree->down, thisOutput, stepSize, channel, comm, ncclShmem->ptrs, 2);
-      for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
-        ssize_t offset = gridOffset + (bid*tree->nHeads+tree->headRank)*chunkSize;
-        int nelem = min(chunkSize, size-offset);
-        if (hasDn) {
-          prims.recvCopySend(thisOutput+offset, nelem);
-        } else {
-          prims.recv(thisOutput+offset, nelem);
-        }
-      }
-    }
-  }
-};
-
-template<class FUNC, typename T, int UNROLL>
 class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL, FUNC, T, UNROLL> {
   public:
   __device__ void run(struct ncclWorkElem* args) {
@@ -413,11 +333,6 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL, FUNC, T, UN
   }
 };
 
-template<class FUNC, typename T, int UNROLL>
-class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_COLLNET, NCCL_PROTO_LL, FUNC, T, UNROLL> {
-  public:
-  __device__ void run(struct ncclWorkElem* args) { }
-};
 
 #include "prims_ll128.h"
 template<class FUNC, typename T, int UNROLL>
@@ -561,10 +476,4 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL128, FUNC, T,
       }
     }
   }
-};
-
-template<class FUNC, typename T, int UNROLL>
-class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_COLLNET, NCCL_PROTO_LL128, FUNC, T, UNROLL> {
-  public:
-__device__ void run(struct ncclWorkElem* args) { }
 };

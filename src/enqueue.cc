@@ -6,7 +6,6 @@
 
 #include "enqueue.h"
 #include "argcheck.h"
-#include "coll_net.h"
 #include "gdrwrap.h"
 
 // Only generate inline kernels for LL
@@ -17,8 +16,7 @@
 
 #define NCCL_FUNC4(func, redop, type) \
   (void*)NCCL_FUNC5(func, TREE,    redop, type), \
-  (void*)NCCL_FUNC5(func, RING,    redop, type), \
-  (void*)NCCL_FUNC5(func, COLLNET, redop, type)
+  (void*)NCCL_FUNC5(func, RING,    redop, type)
 
 // Must be consistent with ncclDataType_t
 #define NCCL_FUNCS3A(func, redop) \
@@ -352,12 +350,8 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info) {
   info->algorithm = -1;
   info->protocol = -1;
   int nAlgos = NCCL_NUM_ALGORITHMS;
-  // Check collNet support
-  int collNetTypeSupport = 0;
-  if (info->comm->collNetSupport > 0)
-    NCCLCHECK(collNetReduceSupport(info->datatype, info->op, &collNetTypeSupport));
+
   for (int a=0; a<nAlgos; a++) {
-    if (a == NCCL_ALGO_COLLNET && collNetTypeSupport != 1) continue;
     for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
       float time;
       NCCLCHECK(ncclTopoGetAlgoTime(info, a, p, &time));
@@ -378,27 +372,14 @@ static ncclResult_t getAlgoInfo(struct ncclInfo* info) {
   int nc = (info->nChannels > 0) ? info->nChannels : comm->nChannels;
   int nt = comm->maxThreads[info->algorithm][info->protocol];
   int threadThreshold = comm->threadThresholds[info->algorithm][info->protocol];
-  if (info->algorithm == NCCL_ALGO_COLLNET) {
-    int ncSwitch = 16;
-    bool flag = true;
-    while (ncSwitch >= 1 && flag) {
-      while ((flag = info->nBytes < nc*nt*info->comm->channels[0].collTree.nHeads*threadThreshold) && nc > ncSwitch) {
-        if (nc == ncSwitch+ncSwitch/2) threadThreshold /= 2;
-        nc--;
-      }
-      ncSwitch /= 2;
-    }
-  } else {
-    while (info->nBytes < nc*nt*threadThreshold) {
-      if (nc >= 2) nc--;
-      else if ((nt % 128) == 0) nt/=2;
-      else break;
-    }
+  while (info->nBytes < nc*nt*threadThreshold) {
+    if (nc >= 2) nc--;
+    else if ((nt % 128) == 0) nt/=2;
+    else break;
   }
   if (info->protocol == NCCL_PROTO_SIMPLE) {
     nt += WARP_SIZE; // Extra warp for sync
     if (info->algorithm == NCCL_ALGO_TREE) nt += WARP_SIZE;
-    if (info->algorithm == NCCL_ALGO_COLLNET) nt += 3*WARP_SIZE;
   }
   info->nChannels = nc;
   info->nThreads = nt;
@@ -415,7 +396,7 @@ static ncclResult_t getPatternInfo(struct ncclInfo* info) {
     case ncclFuncAllGather:
       info->pattern = ncclPatternRing; break;
     case ncclFuncAllReduce:
-      info->pattern = info->algorithm == NCCL_ALGO_COLLNET ? ncclPatternCollTreeUpDown : info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUpDown : ncclPatternRingTwice; break;
+      info->pattern = info->algorithm == NCCL_ALGO_TREE ? ncclPatternTreeUpDown : ncclPatternRingTwice; break;
     default:
       WARN("Unknown pattern for collective %d algorithm %d", info->coll, info->algorithm);
       return ncclInternalError;
@@ -476,14 +457,6 @@ static ncclResult_t computeColl(struct ncclInfo* info /* input */, struct ncclWo
     }
     // Use lastChunkSize as chunkSize
     work->coll.lastChunkSize = chunkSize / ncclTypeSize(info->datatype);
-  } else if (info->algorithm == NCCL_ALGO_COLLNET && info->protocol == NCCL_PROTO_SIMPLE) {
-    // Optimize chunkSize / nSteps
-    while (info->nBytes / (info->nChannels*info->comm->channels[0].collTree.nHeads*chunkSize) < info->comm->channels[0].collTree.depth*32 && chunkSize > 262144) chunkSize /= 2;
-    while (info->nBytes / (info->nChannels*info->comm->channels[0].collTree.nHeads*chunkSize) < info->comm->channels[0].collTree.depth*16 && chunkSize > 131072) chunkSize /= 2;
-    while (info->nBytes / (info->nChannels*info->comm->channels[0].collTree.nHeads*chunkSize) < info->comm->channels[0].collTree.depth*8 && chunkSize > 32768) chunkSize /= 2;
-    while (info->nBytes / (info->nChannels*info->comm->channels[0].collTree.nHeads*chunkSize) < info->comm->channels[0].collTree.depth/2 && chunkSize > 16384) chunkSize /= 2;
-    // Use lastChunkSize as chunkSize
-    work->coll.lastChunkSize = chunkSize / ncclTypeSize(info->datatype);
   } else if (info->protocol == NCCL_PROTO_LL) {
     const ssize_t sliceSize = stepSize*sizeof(uint64_t)/sizeof(union ncclLLFifoLine);
     const ssize_t loopSize = info->nChannels*info->nchunksPerLoop*(ssize_t)sliceSize;
@@ -512,7 +485,7 @@ static ncclResult_t computeColl(struct ncclInfo* info /* input */, struct ncclWo
   proxyArgs->chunkSize = chunkSize;
   proxyArgs->protocol = info->protocol;
   proxyArgs->dtype = info->datatype;
-  proxyArgs->redOp = (info->algorithm == NCCL_ALGO_COLLNET) ? info->op : ncclNumOps;  // Only set redOp when using CollNet
+  proxyArgs->redOp = ncclNumOps;
   proxyArgs->pattern = info->pattern;
   proxyArgs->root = info->root;
   // This is used by P2P to reduce the receive buffer size. We don't use it in collectives

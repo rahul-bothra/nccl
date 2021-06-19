@@ -456,7 +456,6 @@ ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopo
     int n = nets[i];
     struct ncclTopoNode* net = system->nodes[NET].nodes+n;
     struct ncclTopoNode* gpu;
-    if (graph->collNet && net->net.collSupport == 0) continue;
     if (net->net.width < speed) continue;
     if (net->net.maxChannels == 0) continue;
 
@@ -835,7 +834,6 @@ done:
     pass = 2;
   }
 
-  // 3. See if we can increase speedIntra for trees (2 nodes or collnet)
   if (pass == 2) {
     if (time != 0 && graph->pattern != NCCL_TOPO_PATTERN_RING &&
         tmpGraph.speedIntra == graph->speedIntra && tmpGraph.speedIntra < tmpGraph.speedInter*2 &&
@@ -847,7 +845,7 @@ done:
     memcpy(&tmpGraph, graph, sizeof(tmpGraph));
   }
 
-  if (graph->nChannels == 0 && graph->collNet == 0) {
+  if (graph->nChannels == 0) {
     WARN("Could not find a path for pattern %d, falling back to simple order", graph->pattern);
     for (int i=0; i<ngpus; i++) graph->intra[i] = system->nodes[GPU].nodes[i].gpu.rank;
     graph->inter[0] = graph->inter[1] = 0;

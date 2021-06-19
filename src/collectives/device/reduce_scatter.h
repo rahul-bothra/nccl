@@ -188,9 +188,3 @@ class ncclFunction<ncclFuncReduceScatter, NCCL_ALGO_TREE, PROTO, REDOP, T, UNROL
   public:
     __device__ void run(struct ncclWorkElem* args) {}
 };
-
-template<int PROTO, class REDOP, typename T, int UNROLL>
-class ncclFunction<ncclFuncReduceScatter, NCCL_ALGO_COLLNET, PROTO, REDOP, T, UNROLL> {
-  public:
-    __device__ void run(struct ncclWorkElem* args) {}
-};

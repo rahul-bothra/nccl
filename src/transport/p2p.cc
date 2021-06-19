@@ -149,7 +149,6 @@ ncclResult_t p2pSendSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   NCCLCHECK(p2pGetInfo(comm->topo, myInfo, peerInfo, &useRead, &intermediateRank));
 
   struct p2pConnectInfo info;
-  // For CollNet, we use write for scatter-reduce (conn 1), read for broadcast-gather (conn 0)
   info.read = (connIndex == 0) ? useRead : 0;
   const char* useReadStr = info.read ? "/read" : "";
 
@@ -198,7 +197,6 @@ ncclResult_t p2pRecvSetup(struct ncclComm* comm, struct ncclTopoGraph* graph, st
   NCCLCHECK(p2pGetInfo(comm->topo, myInfo, peerInfo, &useRead, &intermediateRank));
 
   struct p2pConnectInfo info;
-  // For CollNet, we use write for scatter-reduce (conn 1), read for broadcast-gather (conn 0)
   info.read = (connIndex == 0) ? useRead : 0;
 
   int recvSize = offsetof(struct ncclRecvMem, buff);

@@ -59,8 +59,6 @@ ncclResult_t freeChannel(struct ncclChannel* channel, int nRanks) {
   free(channel->ring.userRanks);
   CUDACHECK(cudaFree(channel->ring.devUserRanks));
 
-  // Free transport proxy resources
-  // Note: free all send resources first due to CollNet arrangement
   for (int r=0; r<nRanks+1; r++) {
     struct ncclPeer* peer = channel->peers+r;
     for (int b=0; b<NCCL_MAX_CONNS; b++) {

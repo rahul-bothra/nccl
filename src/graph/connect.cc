@@ -164,58 +164,6 @@ static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* 
   return ncclSuccess;
 }
 
-static ncclResult_t connectCollNet(struct ncclComm* comm, struct ncclTopoGraph* collNetGraph) {
-  int rank = comm->rank;
-  int localRanks = comm->localRanks;
-  int nHeads = collNetGraph->nChannels;
-  int *heads;
-  NCCLCHECK(ncclCalloc(&heads, nHeads));
-  // Find all head ranks
-  // Head index is always 0
-  for (int c=0; c<nHeads; c++) {
-    int* collNetIntra = collNetGraph->intra+c*localRanks;
-    heads[c] = collNetIntra[0];
-  }
-  // For all channels
-  for (int c=0; c<comm->nChannels; c++) {
-    struct ncclChannel* channel = comm->channels+c;
-    char line[1024];
-    sprintf(line, "CollNet channel %d rank %d ", c, rank);
-    int nDown = 0;
-    for (int i=0; i<nHeads; i++) {
-      if (rank == heads[i]) { // is head
-        channel->collTree.headRank = i; // Mark the index for deciding offset in the CUDA kernel
-        channel->collTree.out = comm->nRanks; // Set root of collTree to id nranks
-        int* collNetIntra = collNetGraph->intra+i*localRanks;
-        sprintf(line+strlen(line), "down ");
-        for (int r=0; r<localRanks; r++) {
-          if (collNetIntra[r] == rank) continue;
-          channel->collTree.down[nDown++] = collNetIntra[r];  // connect to all peers
-          sprintf(line+strlen(line), " %d ", collNetIntra[r]);
-        }
-        sprintf(line+strlen(line), "nDown %d ", nDown);
-        break;
-      }
-    }
-    // Connect to all heads
-    int nUp = 0;
-    sprintf(line+strlen(line), "up ");
-    for (int h=0; h<nHeads; h++) {
-      if (rank == heads[h]) continue;
-      channel->collTree.up[nUp++] = heads[h];
-      sprintf(line+strlen(line), " %d ", heads[h]);
-    }
-    channel->collTree.nHeads = nHeads;
-    channel->collTree.shift = (rank%localRanks)%nHeads; // Shift by intraRank so that leaves don't send to same head simultaneously
-    channel->collTree.depth = (nUp == 0 && nDown == 0) ? 1 : 2;
-    sprintf(line+strlen(line), "nUp %d nHeads %d ", nUp, nHeads);
-    sprintf(line+strlen(line), "headRank %d out %d shift %d", channel->collTree.headRank, channel->collTree.out, channel->collTree.shift);
-    INFO(NCCL_GRAPH, "%s", line);
-  }
-  free(heads);
-  return ncclSuccess;
-}
-
 // Legacy naming
 NCCL_PARAM(MinNrings, "MIN_NRINGS", -2);
 NCCL_PARAM(MaxNrings, "MAX_NRINGS", -2);
@@ -257,7 +205,7 @@ static int copyChannels(struct ncclComm* comm, int start, int end, int* ringPrev
   return c;
 }
 
-ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePatterns, struct ncclTopoRanks** allTopoRanks, int* rings, struct ncclTopoGraph* collNetGraph) {
+ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePatterns, struct ncclTopoRanks** allTopoRanks, int* rings) {
   // Gather data from all ranks
   int *ringRecv, *ringSend, *ringPrev, *ringNext, *treeToParent, *treeToChild0, *treeToChild1;
   int nranks = comm->nRanks;
@@ -291,16 +239,6 @@ ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePa
 
   // Duplication should be complete now
   nChannels = comm->nChannels = std::min(MAXCHANNELS,nChannels*2);
-
-  // Setup CollNet
-  if (comm->collNetSupport == 1) {
-    // Add more channels to saturate intra-node bandwidth, except the 1 PPN case
-    if (collNetGraph->speedIntra > collNetGraph->speedInter && comm->nRanks > comm->nNodes) {
-      int collNetNchannels = std::min(MAXCHANNELS, nChannels+nChannels/2);
-      nChannels = comm->nChannels = copyChannels(comm, nChannels, collNetNchannels, ringPrev, ringNext);
-    }
-    NCCLCHECK(connectCollNet(comm, collNetGraph));
-  }
 
   // Honor NCCL_MIN_NRINGS/NCCL_MAX_NRINGS.
   // We permit combining max, then min, to only use the first channels, then duplicate them.

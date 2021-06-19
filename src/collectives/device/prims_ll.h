@@ -203,7 +203,6 @@ class ncclLLPrimitives {
     // Make sure step is updated before we read it.
     barrier();
 
-    // If we are going to support oneshot collNet + LL, then we would need to add connector index here
     for (int i=0; i<NRECV && recvPeers[i] >= 0; i++) loadRecvConn(&channel->devPeers[recvPeers[i]].recv->conn, i);
     for (int i=0; i<NSEND && sendPeers[i] >= 0; i++) loadSendConn(&channel->devPeers[sendPeers[i]].send->conn, i);
     loadRecvSync();

@@ -59,10 +59,9 @@ ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system);
 #define NCCL_TOPO_PATTERN_RING 4            // Ring
 struct ncclTopoGraph {
   // Input / output
-  int id; // ring : 0, tree : 1, collnet : 2
+  int id; // ring : 0, tree : 1
   int pattern;
   int crossNic;
-  int collNet;
   int minChannels;
   int maxChannels;
   // Output
@@ -96,9 +95,9 @@ ncclResult_t ncclTopoPreset(struct ncclComm* comm,
     struct ncclTopoRanks* topoRanks);
 
 ncclResult_t ncclTopoPostset(struct ncclComm* comm, int* firstRanks, int* treePatterns,
-    struct ncclTopoRanks** allTopoRanks, int* rings, struct ncclTopoGraph* collNetGraph);
+    struct ncclTopoRanks** allTopoRanks, int* rings);
 
-ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph* treeGraph, struct ncclTopoGraph* ringGraph, struct ncclTopoGraph* collNetGraph);
+ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCompCap, struct ncclTopoGraph* treeGraph, struct ncclTopoGraph* ringGraph);
 #include "info.h"
 ncclResult_t ncclTopoGetAlgoTime(struct ncclInfo* info, int algorithm, int protocol, float* time);
 
