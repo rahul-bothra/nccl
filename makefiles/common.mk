@@ -11,7 +11,6 @@ KEEP ?= 0
 DEBUG ?= 0
 TRACE ?= 0
 PROFAPI ?= 0
-NVTX ?= 1
 
 NVCC = $(CUDA_HOME)/bin/nvcc
 
@@ -86,10 +85,6 @@ endif
 
 ifneq ($(TRACE), 0)
 CXXFLAGS  += -DENABLE_TRACE
-endif
-
-ifeq ($(NVTX), 0)
-CXXFLAGS  += -DNVTX_DISABLE
 endif
 
 ifneq ($(KEEP), 0)

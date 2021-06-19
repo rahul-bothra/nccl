@@ -413,9 +413,6 @@ ncclResult_t ncclProxyAppendPosted(struct ncclProxyState* state) {
 void* persistentThread(void *comm_) {
   struct ncclComm* comm = (struct ncclComm*)comm_;
   struct ncclProxyState* state = &comm->proxyState;
-  char threadName[16];
-  sprintf(threadName, "NCCLproxy %5d", comm->rank);
-  nvtxNameOsThreadA(syscall(SYS_gettid), threadName);
 
   struct ncclProxyArgs** opsPtr = &state->ops;
   while (1) {

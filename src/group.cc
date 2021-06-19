@@ -108,7 +108,6 @@ ncclResult_t ncclAsyncColl(ncclComm_t comm) {
 
 NCCL_API(ncclResult_t, ncclGroupStart);
 ncclResult_t ncclGroupStart() {
-  NVTX3_FUNC_RANGE_IN(nccl_domain);
   if (ncclGroupMode == 0) {
     memset(ncclGroupArgs, 0, sizeof(struct ncclAsyncArgs)*MAX_ASYNC_OPS);
   }
@@ -150,7 +149,6 @@ static size_t getP2pChunkSize(size_t totalSize, int minChannels, int maxChannels
 
 NCCL_API(ncclResult_t, ncclGroupEnd);
 ncclResult_t ncclGroupEnd() {
-  NVTX3_FUNC_RANGE_IN(nccl_domain);
   if (ncclGroupMode == 0) {
     WARN("ncclGroupEnd: not in a group call.");
     return ncclInvalidUsage;
