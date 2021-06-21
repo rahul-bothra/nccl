@@ -45,7 +45,6 @@ extern const char* topoNodeTypeStr[];
 extern const char* topoLinkTypeStr[];
 
 #define PATH_LOC 0
-#define PATH_NVB 2
 #define PATH_PIX 3
 #define PATH_PXB 4
 #define PATH_PHB 5
@@ -123,7 +122,6 @@ ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode*
 ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
 ncclResult_t ncclTopoRemoveNode(struct ncclTopoSystem* system, int type, int id);
 ncclResult_t ncclTopoConnectNodes(struct ncclTopoNode* node, struct ncclTopoNode* remNode, int type, float width);
-ncclResult_t ncclTopoPrintPaths(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoLoadSystem(const char* xmlTopoFile, struct ncclTopoSystem* system);
 
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int64_t* id, int rr);

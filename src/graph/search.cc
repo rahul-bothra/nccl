@@ -581,7 +581,7 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
 /* User defined graph from XML file */
 /************************************/
 
-struct kvDict kvDictLinkType[] = { { "SYS", PATH_SYS }, { "PHB", PATH_PHB }, { "PIX", PATH_PIX }, { "PXB", PATH_PXB }, { "NVB", PATH_NVB}, { "LOC", PATH_LOC }, { NULL, 0 } };
+struct kvDict kvDictLinkType[] = { { "SYS", PATH_SYS }, { "PHB", PATH_PHB }, { "PIX", PATH_PIX }, { "PXB", PATH_PXB }, { "LOC", PATH_LOC }, { NULL, 0 } };
 ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode *xmlChannel, int c, struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   int ngpus = system->nodes[GPU].count;
   int* inter = graph->inter+2*c;
@@ -843,31 +843,6 @@ done:
     graph->speedIntra /= DIVUP(dupChannels, graph->nChannels);
     graph->speedInter /= DIVUP(dupChannels, graph->nChannels);
     graph->nChannels = dupChannels;
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
-  INFO(NCCL_GRAPH, "Pattern %d, crossNic %d, nChannels %d, speed %f/%f, type %s/%s, sameChannels %d", graph->pattern, graph->crossNic, graph->nChannels, graph->speedIntra, graph->speedInter, topoPathTypeStr[graph->typeIntra], topoPathTypeStr[graph->typeInter], graph->sameChannels);
-  int ngpus = system->nodes[GPU].count;
-
-  char line[1024];
-  for (int c=0; c<graph->nChannels; c++) {
-    sprintf(line, "%2d :", c);
-    int offset = strlen(line);
-    if (system->nodes[NET].count > 0) {
-      sprintf(line+offset, " %s/%d", topoNodeTypeStr[NET], graph->inter[2*c]);
-      offset = strlen(line);
-    }
-    for (int i=0; i<ngpus; i++) {
-      sprintf(line+offset, " %s/%d", topoNodeTypeStr[GPU], graph->intra[ngpus*c+i]);
-      offset = strlen(line);
-    }
-    if (system->nodes[NET].count > 0) {
-      sprintf(line+offset, " %s/%d", topoNodeTypeStr[NET], graph->inter[2*c+1]);
-      offset = strlen(line);
-    }
-    INFO(NCCL_GRAPH, "%s", line);
   }
   return ncclSuccess;
 }

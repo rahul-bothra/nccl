@@ -19,7 +19,7 @@
 
 const char* topoNodeTypeStr[] = { "GPU", "PCI", "NVS", "CPU", "NIC", "NET" };
 const char* topoLinkTypeStr[] = { "LOC", "", "",    "PCI", "",    "",    "SYS", "NET" };
-const char* topoPathTypeStr[] = { "LOC", "", "NVB", "PIX", "PXB", "PHB", "SYS" };
+const char* topoPathTypeStr[] = { "LOC", "", "", "PIX", "PXB", "PHB", "SYS" };
 
 /******************************************************************/
 /******************* Graph Creation Functions *********************/
@@ -232,49 +232,6 @@ ncclResult_t ncclTopoConnectCpus(struct ncclTopoSystem* system) {
       NCCLCHECK(ncclTopoConnectNodes(system->nodes[CPU].nodes+n, system->nodes[CPU].nodes+p, LINK_SYS, width));
     }
   }
-  return ncclSuccess;
-}
-
-static ncclResult_t ncclTopoPrintRec(struct ncclTopoNode* node, struct ncclTopoNode* prevNode, char* line, int offset) {
-  if (node->type == GPU) {
-    sprintf(line+offset, "%s/%lX (%d)", topoNodeTypeStr[node->type], node->id, node->gpu.rank);
-  } else if (node->type == CPU) {
-    sprintf(line+offset, "%s/%lX (%d/%d/%d)", topoNodeTypeStr[node->type], node->id, node->cpu.arch, node->cpu.vendor, node->cpu.model);
-  } else if (node->type == PCI) {
-    sprintf(line+offset, "%s/%lX (%lx)", topoNodeTypeStr[node->type], node->id, node->pci.device);
-  } else {
-    sprintf(line+offset, "%s/%lX", topoNodeTypeStr[node->type], node->id);
-  }
-  INFO(NCCL_GRAPH, "%s", line);
-  for (int i=0; i<offset; i++) line[i] = ' ';
-
-  for (int l=0; l<node->nlinks; l++) {
-    struct ncclTopoLink* link = node->links+l;
-    if (link->type == LINK_LOC) continue;
-    if (link->type != LINK_PCI || link->remNode != prevNode) {
-      sprintf(line+offset, "+ %s[%2.1f] - ", topoLinkTypeStr[link->type], link->width);
-      int nextOffset = strlen(line);
-      if (link->type == LINK_PCI) {
-        NCCLCHECK(ncclTopoPrintRec(link->remNode, node, line, nextOffset));
-      } else {
-        if (link->remNode->type == NET) {
-          sprintf(line+nextOffset, "%s/%lX (%lx/%d/%f)", topoNodeTypeStr[link->remNode->type], link->remNode->id, link->remNode->net.asic, link->remNode->net.port, link->remNode->net.width);
-        } else {
-          sprintf(line+nextOffset, "%s/%lX", topoNodeTypeStr[link->remNode->type], link->remNode->id);
-        }
-        INFO(NCCL_GRAPH, "%s", line);
-      }
-    }
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoPrint(struct ncclTopoSystem* s) {
-  INFO(NCCL_GRAPH, "=== System : maxWidth %2.1f totalWidth %2.1f ===", s->maxWidth, s->totalWidth);
-  char line[1024];
-  for (int n=0; n<s->nodes[CPU].count; n++) NCCLCHECK(ncclTopoPrintRec(s->nodes[CPU].nodes+n, NULL, line, 0));
-  INFO(NCCL_GRAPH, "==========================================");
-  NCCLCHECK(ncclTopoPrintPaths(s));
   return ncclSuccess;
 }
 

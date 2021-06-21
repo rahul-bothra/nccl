@@ -392,7 +392,6 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
 
 NCCL_PARAM(CrossNic, "CROSS_NIC", 2);
 NCCL_PARAM(GraphDumpFileRank, "GRAPH_DUMP_FILE_RANK", 0);
-NCCL_PARAM(NvbPreconnect, "NVB_PRECONNECT", 1);
 
 static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* commId) {
   // We use 2 AllGathers
@@ -475,8 +474,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* comm
   NCCLCHECK(ncclTopoComputePaths(comm->topo, comm->peerInfo));
   // Init search
   NCCLCHECK(ncclTopoSearchInit(comm->topo));
-  // Print final topology
-  NCCLCHECK(ncclTopoPrint(comm->topo));
 
   // Get rings and trees
   struct ncclTopoGraph ringGraph;
@@ -486,7 +483,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* comm
   ringGraph.minChannels = 1;
   ringGraph.maxChannels = MAXCHANNELS/2;
   NCCLCHECK(ncclTopoCompute(comm->topo, &ringGraph));
-  NCCLCHECK(ncclTopoPrintGraph(comm->topo, &ringGraph));
 
   struct ncclTopoGraph treeGraph;
   treeGraph.id = 1;
@@ -495,7 +491,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* comm
   treeGraph.minChannels = 1;
   treeGraph.maxChannels = ringGraph.nChannels;
   NCCLCHECK(ncclTopoCompute(comm->topo, &treeGraph));
-  NCCLCHECK(ncclTopoPrintGraph(comm->topo, &treeGraph));
 
   // AllGather3 - begin
   struct ncclGraphInfo {
@@ -641,32 +636,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* comm
 
   // Compute nChannels per peer for p2p
   NCCLCHECK(ncclTopoComputeP2pChannels(comm));
-
-  if (ncclParamNvbPreconnect()) {
-    // Connect p2p when using NVB path
-    int nvbNpeers;
-    int* nvbPeers;
-    NCCLCHECK(ncclTopoGetNvbGpus(comm->topo, comm->rank, &nvbNpeers, &nvbPeers));
-    for (int r=0; r<nvbNpeers; r++) {
-      int peer = nvbPeers[r];
-      int delta = (comm->nRanks + (comm->rank-peer)) % comm->nRanks;
-      for (int c=0; c<comm->p2pnChannelsPerPeer; c++) {
-        int channelId = (delta+comm->p2pChannels[c]) % comm->p2pnChannels;
-        if (comm->channels[channelId].peers[peer].recv[0].connected == 0) { // P2P uses only 1 connector
-          comm->connectRecv[peer] |= (1<<channelId);
-        }
-      }
-      delta = (comm->nRanks - (comm->rank-peer)) % comm->nRanks;
-      for (int c=0; c<comm->p2pnChannelsPerPeer; c++) {
-        int channelId = (delta+comm->p2pChannels[c]) % comm->p2pnChannels;
-        if (comm->channels[channelId].peers[peer].send[0].connected == 0) { // P2P uses only 1 connector
-          comm->connectSend[peer] |= (1<<channelId);
-        }
-      }
-    }
-    NCCLCHECK(ncclTransportP2pSetup(comm, NULL, 0));
-    free(nvbPeers);
-  }
 
   NCCLCHECK(ncclCommSetIntra(comm, intraRank, intraRanks, intraRank0Comm));
 

@@ -29,8 +29,6 @@ static ncclResult_t getPath(struct ncclTopoSystem* system, struct ncclTopoNode* 
   return ncclInternalError;
 }
 
-NCCL_PARAM(NvbDisable, "NVB_DISABLE", 0);
-
 static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclTopoSystem* system) {
   if (baseNode->paths[baseNode->type] == NULL) {
     NCCLCHECK(ncclCalloc(baseNode->paths+baseNode->type, system->nodes[baseNode->type].count));
@@ -102,48 +100,6 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
       }
     }
     memcpy(&nodeList, &nextNodeList, sizeof(nodeList));
-  }
-  return ncclSuccess;
-}
-
-static void printNodePaths(struct ncclTopoSystem* system, struct ncclTopoNode* node) {
-  char line[1024];
-#ifdef ENABLE_TRACE
-  INFO(NCCL_GRAPH, "Paths from %s/%lX :", topoNodeTypeStr[node->type], node->id);
-#else
-  sprintf(line, "%s/%lX :", topoNodeTypeStr[node->type], node->id);
-  int offset = strlen(line);
-#endif
-  for (int t=0; t<NCCL_TOPO_NODE_TYPES; t++) {
-    if (node->paths[t] == NULL) continue;
-    for (int n = 0; n<system->nodes[t].count; n++) {
-#ifdef ENABLE_TRACE
-      line[0] = 0;
-      int offset = 0;
-      for (int i=0; i<node->paths[t][n].count; i++) {
-        struct ncclTopoLink* link = node->paths[t][n].list[i];
-        struct ncclTopoNode* remNode = link->remNode;
-        sprintf(line+offset, "--%s->%s/%lX", topoLinkTypeStr[link->type], topoNodeTypeStr[remNode->type], remNode->id);
-        offset = strlen(line);
-      }
-      INFO(NCCL_GRAPH, "%s (%f)", line, node->paths[t][n].width);
-#else
-      sprintf(line+offset, "%s/%lX (%d/%f/%s) ", topoNodeTypeStr[t], system->nodes[t].nodes[n].id, node->paths[t][n].count, node->paths[t][n].width, topoPathTypeStr[node->paths[t][n].type]);
-      offset = strlen(line);
-#endif
-    }
-  }
-#ifndef ENABLE_TRACE
-  INFO(NCCL_GRAPH, "%s", line);
-#endif
-}
-
-ncclResult_t ncclTopoPrintPaths(struct ncclTopoSystem* system) {
-  for (int i=0; i<system->nodes[GPU].count; i++) {
-    printNodePaths(system, system->nodes[GPU].nodes+i);
-  }
-  for (int i=0; i<system->nodes[NET].count; i++) {
-    printNodePaths(system, system->nodes[NET].nodes+i);
   }
   return ncclSuccess;
 }
@@ -463,19 +419,3 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) {
-  int ngpus = system->nodes[GPU].count;
-  NCCLCHECK(ncclCalloc(ranks, ngpus));
-  int nvbGpus = 0;
-  for (int g=0; g<ngpus; g++) {
-    struct ncclTopoNode* gpu = system->nodes[GPU].nodes+g;
-    if (gpu->gpu.rank != rank) continue;
-    for (int p=0; p<ngpus; p++) {
-      if (gpu->paths[GPU][p].type == PATH_NVB) {
-        (*ranks)[nvbGpus++] = system->nodes[GPU].nodes[p].gpu.rank;
-      }
-    }
-  }
-  *nranks = nvbGpus;
-  return ncclSuccess;
-}
