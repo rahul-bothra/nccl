@@ -8,7 +8,6 @@
 #include "graph.h"
 #include "topo.h"
 #include "comm.h"
-#include "nvmlwrap.h"
 #include "net.h"
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -19,8 +18,8 @@
 #define BUSID_REDUCED_SIZE (sizeof("0000:00"))
 
 const char* topoNodeTypeStr[] = { "GPU", "PCI", "NVS", "CPU", "NIC", "NET" };
-const char* topoLinkTypeStr[] = { "LOC", "NVL", "",    "PCI", "",    "",    "SYS", "NET" };
-const char* topoPathTypeStr[] = { "LOC", "NVL", "NVB", "PIX", "PXB", "PHB", "SYS" };
+const char* topoLinkTypeStr[] = { "LOC", "", "",    "PCI", "",    "",    "SYS", "NET" };
+const char* topoPathTypeStr[] = { "LOC", "", "NVB", "PIX", "PXB", "PHB", "SYS" };
 
 /******************************************************************/
 /******************* Graph Creation Functions *********************/
@@ -76,13 +75,6 @@ static ncclResult_t ncclTopoGetInterCpuWidth(struct ncclTopoNode* cpu, float* wi
   }
   return ncclSuccess;
 }
-
-enum ncclNvLinkDeviceType {
-  ncclNvLinkDeviceUnknown,
-  ncclNvLinkDeviceGpu,
-  ncclNvLinkDeviceSwitch,
-  ncclNvLinkDeviceBridge, // IBM/Power NVLink bridge (Device 04ea)
-};
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id) {
   for (int i=0; i<system->nodes[type].count; i++) {
@@ -481,57 +473,6 @@ ncclResult_t ncclTopoAddCpu(struct ncclXmlNode* xmlCpu, struct ncclTopoSystem* s
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoAddNvLinks(struct ncclXmlNode* node, struct ncclTopoSystem* system, const char* parentBusId) {
-  if (strcmp(node->name, "nvlink") == 0) {
-    struct ncclTopoNode* gpu = NULL;
-    int64_t pBusId;
-    NCCLCHECK(busIdToInt64(parentBusId, &pBusId));
-    NCCLCHECK(ncclTopoGetNode(system, &gpu, GPU, pBusId));
-    if (gpu == NULL) {
-      WARN("Add NVLink error : could not find GPU %lx", pBusId);
-      return ncclInternalError;
-    }
-    int count;
-    NCCLCHECK(xmlGetAttrInt(node, "count", &count));
-    const char* targetClass;
-    NCCLCHECK(xmlGetAttrStr(node, "tclass", &targetClass));
-    int targetType;
-    NCCLCHECK(kvConvertToInt(targetClass, &targetType, kvDictPciClass));
-    struct ncclTopoNode* remote = NULL;
-    if (targetType == GPU) {
-      // NVL P2P connection to another GPU
-      const char* target;
-      NCCLCHECK(xmlGetAttrStr(node, "target", &target));
-      int64_t busId;
-      NCCLCHECK(busIdToInt64(target, &busId));
-      NCCLCHECK(ncclTopoGetNode(system, &remote, GPU, busId));
-    } else if (targetType == CPU) {
-      // NVL connection to the local CPU
-      NCCLCHECK(findLocalCpu(gpu, &remote));
-    } else {
-      if (system->nodes[NVS].count == 0) {
-        NCCLCHECK(ncclTopoCreateNode(system, &remote, NVS, 0));
-      } else {
-        remote = system->nodes[NVS].nodes;
-      }
-    }
-    if (remote) {
-      float nvlSpeed = ncclTopoNVLinkSpeed(gpu->gpu.cudaCompCap);
-      NCCLCHECK(ncclTopoConnectNodes(gpu, remote, LINK_NVL, count*nvlSpeed));
-      if (remote->type != GPU) {
-        NCCLCHECK(ncclTopoConnectNodes(remote, gpu, LINK_NVL, count*nvlSpeed));
-      }
-    }
-  } else {
-    const char* busId;
-    NCCLCHECK(xmlGetAttr(node, "busid", &busId));
-    for (int s=0; s<node->nSubs; s++) {
-      NCCLCHECK(ncclTopoAddNvLinks(node->subs[s], system, busId ? busId : parentBusId));
-    }
-  }
-  return ncclSuccess;
-}
-
 ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem** topoSystem) {
   NCCLCHECK(ncclCalloc(topoSystem, 1));
   struct ncclXmlNode* topNode;
@@ -540,7 +481,6 @@ ncclResult_t ncclTopoGetSystemFromXml(struct ncclXml* xml, struct ncclTopoSystem
     struct ncclXmlNode* node = topNode->subs[s];
     if (strcmp(node->name, "cpu") == 0) NCCLCHECK(ncclTopoAddCpu(node, *topoSystem));
   }
-  NCCLCHECK(ncclTopoAddNvLinks(topNode, *topoSystem, NULL));
 
   NCCLCHECK(ncclTopoFlattenBcmSwitches(*topoSystem));
   NCCLCHECK(ncclTopoConnectCpus(*topoSystem));
@@ -592,7 +532,7 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
   // Auto-detect GPUs if needed
   for (int r=0; r<comm->nRanks; r++) {
     if (comm->peerInfo[r].hostHash == comm->peerInfo[comm->rank].hostHash) {
-      char busId[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+      char busId[14];
       NCCLCHECK(int64ToBusId(comm->peerInfo[r].busId, busId));
       struct ncclXmlNode* node;
       NCCLCHECK(ncclTopoFillGpu(xml, busId, &node));

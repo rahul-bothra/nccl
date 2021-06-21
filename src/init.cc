@@ -6,7 +6,6 @@
 
 #include "nccl.h"
 #include "channel.h"
-#include "nvmlwrap.h"
 #include "bootstrap.h"
 #include "transport.h"
 #include "group.h"

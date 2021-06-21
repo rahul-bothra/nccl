@@ -64,8 +64,7 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
         float width = std::min(path->width, link->width);
 
         // allow routing through a GPU only as 1 hop
-        if (node != baseNode && node->type == GPU &&
-            (ncclParamNvbDisable() || link->type != LINK_NVL || remNode->type != GPU || path->count > 1)) continue;
+        if (node != baseNode && node->type == GPU) continue;
 
         if ((remPath->width == 0 || remPath->count > path->count) && remPath->width < width) {
           // Find reverse link
@@ -92,8 +91,6 @@ static ncclResult_t ncclTopoSetPaths(struct ncclTopoNode* baseNode, struct ncclT
           if (node->type == PCI && remNode->type == PCI) type = PATH_PXB;
           // Consider a path going through the CPU as PATH_PHB
           if (link->type == LINK_PCI && (node->type == CPU || link->remNode->type == CPU)) type = PATH_PHB;
-          // Set 1 hop NVLink as NVB
-          if (node->type == GPU && path->type == PATH_NVL && type == PATH_NVL && remPath->count > 1) type = PATH_NVB;
 
           remPath->type = std::max(path->type, type);
 
@@ -292,12 +289,6 @@ compare:
   // Compute the PCI distance and compare with the p2pLevel.
   if (path->type <= p2pLevel) *p2p = 1;
 
-  if (path->type == PATH_NVL) {
-    struct ncclTopoNode* gpu2 = system->nodes[GPU].nodes+g2;
-    // Enable P2P Read for Ampere/NVLink only
-    if (read && (gpu1->gpu.cudaCompCap == gpu2->gpu.cudaCompCap) && (gpu1->gpu.cudaCompCap == 80)) *read = 1;
-  }
-
   return ncclSuccess;
 }
 
@@ -423,12 +414,7 @@ static ncclResult_t ncclTopoGetNchannels(struct ncclTopoSystem* system, int g /*
     }
     // Local rank
     path = system->nodes[GPU].nodes[peer].paths[GPU]+g;
-    if (path->type == PATH_NVL) {
-      float nvlWidth = ncclTopoNVLinkSpeed(system->nodes[GPU].nodes[g].gpu.cudaCompCap);
-      *nChannels = 2*std::max(1, (int)(path->width / nvlWidth));
-    } else {
-      *nChannels = 2;
-    }
+    *nChannels = 2;
   } else {
     // Remote rank, use network
     *nChannels = 1;

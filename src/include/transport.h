@@ -9,7 +9,6 @@
 
 #include "devcomm.h"
 #include "graph.h"
-#include "nvmlwrap.h"
 #include "core.h"
 #include "proxy.h"
 

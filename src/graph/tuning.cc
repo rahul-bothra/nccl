@@ -54,14 +54,10 @@ ncclResult_t parseList(const char* str, const char* elems[], int nelems, int* li
 static const float baseLat  [NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = { { 0 }, { 8.4 } };
 
 // NVLink, PCI, Network
-#define NCCL_HW_NVLINK 0
-#define NCCL_HW_PCI 1
-#define NCCL_HW_NET 2
+#define NCCL_HW_PCI 0
+#define NCCL_HW_NET 1
 // Tree/Simple is the latency a 256kB chunk, which is ~ base lat + 256k/12GB/s (+ 256k/12GB/s for the network).
-static const float hwLat [3][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] =
-{ /* NVLINK */
-  { /* Tree*/ { 28 }, /* Ring*/ { 3.4 } },
-  /* PCI */
+static const float hwLat [2][NCCL_NUM_ALGORITHMS][NCCL_NUM_PROTOCOLS] = {
   { /* Tree*/ { 28 }, /* Ring*/ { 5.7 } },
   /* NET */
   { /* Tree*/ { 28 }, /* Ring*/ { 9.6 } }
@@ -88,7 +84,7 @@ ncclResult_t ncclTopoTuneModel(struct ncclComm* comm, int minCompCap, int maxCom
 
   struct ncclTopoGraph* graphs[NCCL_NUM_ALGORITHMS] = { treeGraph, ringGraph };
   int intraHw[NCCL_NUM_ALGORITHMS], hw[NCCL_NUM_ALGORITHMS];
-  for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) intraHw[a] = graphs[a]->typeIntra == LINK_NVL ? NCCL_HW_NVLINK : NCCL_HW_PCI;
+  for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) intraHw[a] = NCCL_HW_PCI;
   for (int a=0; a<NCCL_NUM_ALGORITHMS; a++) hw[a] = nNodes == 1 ? intraHw[a] : NCCL_HW_NET;
 
   for (int coll=0; coll<NCCL_NUM_FUNCTIONS; coll++) {

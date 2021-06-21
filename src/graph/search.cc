@@ -23,13 +23,12 @@ static float getMaxWidth(struct ncclTopoSystem* system, struct ncclTopoNode* gpu
   return maxWidth;
 }
 static float getTotalWidth(struct ncclTopoSystem* system, struct ncclTopoNode* gpu) {
-  float nvlinkWidth = 0.0, pciWidth = 0.0;
+  float pciWidth = 0.0;
   for (int l=0; l<gpu->nlinks; l++) {
     struct ncclTopoLink* link = gpu->links+l;
-    if (link->type == LINK_NVL) nvlinkWidth += link->width;
     if (link->type == LINK_PCI) pciWidth = link->width;
   }
-  return std::max(pciWidth, nvlinkWidth);
+  return pciWidth;
 }
 ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system) {
   system->maxWidth = 0.0;
@@ -85,10 +84,6 @@ static ncclResult_t followPath(struct ncclTopoLinkList* path, struct ncclTopoNod
     if (link->remNode->type == GPU && link->remNode->gpu.cudaCompCap < 80 && start->type != GPU) {
       if (revLink == NULL) NCCLCHECK(findRevLink(node, link->remNode, &revLink));
       revSpeed += fwSpeed/8;
-    }
-    if (link->remNode->type == CPU && link->type == LINK_NVL) {
-      if (revLink == NULL) NCCLCHECK(findRevLink(node, link->remNode, &revLink));
-      revSpeed += fwSpeed;
     }
     if (link->width < fwSpeed || (revSpeed && revLink->width < revSpeed)) { *steps = step; return ncclSuccess; }
     SUB_ROUND(link->width, fwSpeed);
@@ -586,7 +581,7 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
 /* User defined graph from XML file */
 /************************************/
 
-struct kvDict kvDictLinkType[] = { { "SYS", PATH_SYS }, { "PHB", PATH_PHB }, { "PIX", PATH_PIX }, { "PXB", PATH_PXB }, { "NVL", PATH_NVL }, { "NVB", PATH_NVB}, { "LOC", PATH_LOC }, { NULL, 0 } };
+struct kvDict kvDictLinkType[] = { { "SYS", PATH_SYS }, { "PHB", PATH_PHB }, { "PIX", PATH_PIX }, { "PXB", PATH_PXB }, { "NVB", PATH_NVB}, { "LOC", PATH_LOC }, { NULL, 0 } };
 ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode *xmlChannel, int c, struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
   int ngpus = system->nodes[GPU].count;
   int* inter = graph->inter+2*c;
@@ -714,7 +709,7 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
   int crossNic = (system->nodes[NET].count > 1) && graph->crossNic ? 1 : 0;
   graph->speedIntra = graph->speedInter = 0;
   if (graph->crossNic == 2) graph->crossNic = 0;
-  graph->typeIntra = ngpus == 1 ? PATH_LOC : PATH_NVL;
+  graph->typeIntra = PATH_LOC;
   graph->typeInter = PATH_PIX;
   graph->nChannels = 0;
   graph->sameChannels = 1;
@@ -790,7 +785,7 @@ search:
       tmpGraph.typeIntra += 1;
       goto search;
     }
-    tmpGraph.typeIntra = ngpus == 1 ? PATH_LOC : PATH_NVL;
+    tmpGraph.typeIntra = PATH_LOC;
     if (system->nodes[NET].count > 0 && tmpGraph.typeInter < PATH_SYS && (graph->nChannels == 0 || tmpGraph.typeInter < graph->typeInter || tmpGraph.typeInter < PATH_PXB)) {
       tmpGraph.typeInter += 1;
       goto search;

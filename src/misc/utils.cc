@@ -7,8 +7,6 @@
 #include "utils.h"
 #include "core.h"
 
-#include "nvmlwrap.h"
-
 // Get current Compute Capability
 int ncclCudaCompCap() {
   int cudaDev;
