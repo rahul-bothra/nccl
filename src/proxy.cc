@@ -232,77 +232,6 @@ ncclResult_t ncclProxySaveColl(struct ncclProxyArgs* args, int nranks) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclProxyComputeP2p(struct ncclInfo* info, struct ncclProxyArgs* args) {
-  memset(args, 0, sizeof(struct ncclProxyArgs));
-  int channelId = info->channelId;
-  args->nsubs = 1;
-  struct ncclProxySubArgs* sub = args->subs;
-
-  struct ncclChannel* channel = info->comm->channels+channelId;
-  sub->channel = channel;
-  args->sliceSteps = 1;
-  args->chunkSteps = 1;
-  args->protocol = NCCL_PROTO_SIMPLE;
-  args->dtype = info->datatype;
-  sub->delta = info->delta;
-  sub->recvbytes = info->recvbytes;
-  sub->sendbytes = info->sendbytes;
-
-  int stepSize = info->comm->buffSizes[NCCL_PROTO_SIMPLE]/NCCL_STEPS/SENDRECV_SLICEFACTOR;
-  info->recvChunkSize = stepSize;
-  info->sendChunkSize = stepSize;
-
-  if (info->delta > 0 && info->recvbytes >= 0) {
-    int peerrecv = (info->comm->nRanks+info->comm->rank-info->delta)%info->comm->nRanks;
-    if (channel->peers[peerrecv].recv[0].transportComm && channel->peers[peerrecv].recv[0].transportComm->proxy) {
-      // Tune chunk size for the network
-      if (info->recvbytes < stepSize) info->recvChunkSize /= 4;
-      else if (info->recvbytes < 8*stepSize) info->recvChunkSize /= 2;
-    }
-    sub->recvChunkSize = info->recvChunkSize;
-  }
-  if (info->delta > 0 && info->sendbytes >= 0) {
-    int peersend = (info->comm->rank+info->delta)%info->comm->nRanks;
-    if (channel->peers[peersend].send[0].transportComm && channel->peers[peersend].send[0].transportComm->proxy) {
-      // Tune chunk size for the network
-      if (info->sendbytes < stepSize) info->sendChunkSize /= 4;
-      else if (info->sendbytes < 8*stepSize) info->sendChunkSize /= 2;
-    }
-    sub->sendChunkSize = info->sendChunkSize;
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t ncclProxySaveP2p(struct ncclComm* comm, struct ncclProxyArgs* args) {
-  struct ncclProxySubArgs* sub = args->subs;
-  struct ncclChannel* channel = sub->channel;
-  args->opCount = channel->workFifoTail-1;
-  args->commOpCount = comm->opCount;
-  const ssize_t recvbytesOrig = sub->recvbytes;
-  const ssize_t sendbytesOrig = sub->sendbytes;
-  if (sub->delta > 0 && recvbytesOrig >= ssize_t(0)) {
-    int peerrecv = (comm->nRanks+comm->rank-sub->delta)%comm->nRanks;
-    sub->recvbytes = recvbytesOrig;
-    sub->sendbytes = 0;
-    sub->nsteps = DIVUP(sub->recvbytes, sub->recvChunkSize);
-    if (sub->nsteps == 0) sub->nsteps = 1;
-    NCCLCHECK(SaveProxy(proxyRecv, peerrecv, args, 0));
-  }
-  if (sub->delta > 0 && sendbytesOrig >= ssize_t(0)) {
-    int peersend = (comm->rank+sub->delta)%comm->nRanks;
-    sub->sendbytes = sendbytesOrig;
-    sub->recvbytes = 0;
-    sub->nsteps = DIVUP(sub->sendbytes, sub->sendChunkSize);
-    if (sub->nsteps == 0) sub->nsteps = 1;
-    NCCLCHECK(SaveProxy(proxySend, peersend, args, 0));
-  }
-  // Reset proxy args for potentially multiple cuda graph launches
-  // It is safe as long as SaveProxy copies contents of args to op
-  sub->recvbytes = recvbytesOrig;
-  sub->sendbytes = sendbytesOrig;
-  return ncclSuccess;
-}
-
 static ncclResult_t removeOp(struct ncclProxyState* state, struct ncclProxyArgs** opPtr, struct ncclProxyArgs** prevOpPtr) {
   struct ncclProxyArgs* freeOp = *opPtr;
   DEBUG_PROXY_PRINT("Remove %ld -> %ld -> %ld\n", OP_INDEX(*prevOpPtr), OP_INDEX(freeOp), OP_INDEX(freeOp->next));
@@ -458,37 +387,6 @@ ncclResult_t ncclProxyStart(struct ncclComm* comm) {
   comm->opCount++;
   return ncclSuccess;
 }
-
-ncclResult_t ncclProxySharedBuffersInit(struct ncclComm* comm, int cuda, int* size, char** ptr) {
-  struct ncclProxySharedBuffers* state = &comm->proxyState.sharedBuffs;
-  if (state->size == 0) {
-    int p2pnChannels = 1;
-    while (p2pnChannels < comm->nChannels) p2pnChannels *= 2;
-    int p2pSize = 2*p2pnChannels*NCCL_MAX_WORK_ELEMENTS*comm->buffSizes[NCCL_PROTO_SIMPLE]/SENDRECV_SLICEFACTOR;
-    state->size = p2pSize;
-  }
-
-  *size = state->size;
-
-  if (cuda && state->cudaBuff == NULL) {
-    NCCLCHECK(ncclCudaCalloc(&state->cudaBuff, *size));
-  } else if (state->hostBuff == NULL) {
-    NCCLCHECK(ncclCudaHostCalloc(&state->hostBuff, *size));
-  }
-  *ptr = cuda ? state->cudaBuff : state->hostBuff;
-  return ncclSuccess;
-}
-
-ncclResult_t ncclProxySharedBuffersGetP2p(struct ncclComm* comm, int cuda, int type, int channel, int slot, int index, char** ptr) {
-  struct ncclProxySharedBuffers* state = &comm->proxyState.sharedBuffs;
-  // Use different pools for separate send/recv.
-  char* buff = cuda ? state->cudaBuff : state->hostBuff;
-  int slotSize = comm->buffSizes[NCCL_PROTO_SIMPLE]/(NCCL_STEPS*SENDRECV_SLICEFACTOR);
-  int globalSlot = (((type*comm->p2pnChannels+channel)*NCCL_STEPS)+slot)*NCCL_MAX_WORK_ELEMENTS+index;
-  *ptr = buff + slotSize * globalSlot;
-  return ncclSuccess;
-}
-
 
 ncclResult_t ncclProxySharedBuffersDestroy(struct ncclComm* comm) {
   struct ncclProxySharedBuffers* state = &comm->proxyState.sharedBuffs;

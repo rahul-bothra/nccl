@@ -52,20 +52,12 @@ ncclResult_t ArgsCheck(struct ncclInfo* info) {
   }
 
   if (info->comm->checkPointers) {
-    if (info->coll == ncclFuncSendRecv) {
-      if (strcmp(info->opName, "Send") == 0) {
-        NCCLCHECK(CudaPtrCheck(info->sendbuff, info->comm, "sendbuff", "Send"));
-      } else {
-        NCCLCHECK(CudaPtrCheck(info->recvbuff, info->comm, "recvbuff", "Recv"));
-      }
-    } else {
-      // Check CUDA device pointers
-      if (info->comm->rank == info->root) {
-        NCCLCHECK(CudaPtrCheck(info->sendbuff, info->comm, "sendbuff", info->opName));
-      }
-      if (info->coll != ncclFuncReduce || info->comm->rank == info->root) {
-        NCCLCHECK(CudaPtrCheck(info->recvbuff, info->comm, "recvbuff", info->opName));
-      }
+    // Check CUDA device pointers
+    if (info->comm->rank == info->root) {
+      NCCLCHECK(CudaPtrCheck(info->sendbuff, info->comm, "sendbuff", info->opName));
+    }
+    if (info->coll != ncclFuncReduce || info->comm->rank == info->root) {
+      NCCLCHECK(CudaPtrCheck(info->recvbuff, info->comm, "recvbuff", info->opName));
     }
   }
   return ncclSuccess;

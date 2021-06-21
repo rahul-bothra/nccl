@@ -175,13 +175,6 @@ ncclResult_t netSendConnect(struct ncclComm* comm, struct ncclConnect* connectIn
   // Connect to remote peer
   NCCLCHECK(ncclNetConnect(resources->netDev, info->netHandle, &resources->netSendComm));
 
-  if (resources->shared) {
-    // Get shared buffers
-    int loc = LOC_HOSTMEM;
-    NCCLCHECK(ncclProxySharedBuffersInit(send->comm, 0, resources->buffSizes+loc, resources->buffers+loc));
-    resources->mhandlesProto[NCCL_PROTO_SIMPLE] = resources->mhandles+loc;
-  }
-
   if (resources->buffSizes[LOC_DEVMEM]) {
     NCCLCHECK(ncclNetRegMr(resources->netSendComm, resources->buffers[LOC_DEVMEM], resources->buffSizes[LOC_DEVMEM], NCCL_PTR_CUDA, &resources->mhandles[LOC_DEVMEM]));
   }
@@ -199,13 +192,6 @@ ncclResult_t netRecvConnect(struct ncclComm* comm, struct ncclConnect* connectIn
   // Finish connection establishment from remote peer
   NCCLCHECK(ncclNetAccept(resources->netListenComm, &resources->netRecvComm));
   NCCLCHECK(ncclNetCloseListen(resources->netListenComm));
-
-  if (resources->shared) {
-    // Get shared buffers
-    int loc = LOC_HOSTMEM;
-    NCCLCHECK(ncclProxySharedBuffersInit(recv->comm, 0, resources->buffSizes+loc, resources->buffers+loc));
-    resources->mhandlesProto[NCCL_PROTO_SIMPLE] = resources->mhandles+loc;
-  }
 
   if (resources->buffSizes[LOC_DEVMEM]) {
     NCCLCHECK(ncclNetRegMr(resources->netRecvComm, resources->buffers[LOC_DEVMEM], resources->buffSizes[LOC_DEVMEM], NCCL_PTR_CUDA, &resources->mhandles[LOC_DEVMEM]));
@@ -274,21 +260,11 @@ ncclResult_t netSendProxy(struct ncclProxyArgs* args) {
       int stepSize = sub->connector->comm->buffSizes[p] / NCCL_STEPS;
       char* localBuff = sub->connector->conn.buffs[p];
       int buffSize = stepSize*args->sliceSteps;
-      if (resources->shared) buffSize /= SENDRECV_SLICEFACTOR;
       if (sub->sendbytes < buffSize) buffSize = sub->sendbytes;
       // Post buffers to the GPU
       if (sub->posted < sub->nsteps && sub->posted < sub->done + NCCL_STEPS) {
         int buffSlot = (sub->base+sub->posted)%NCCL_STEPS;
-        if (resources->shared) {
-          char* ptr;
-          int sharedBuffSlot = sub->posted%NCCL_STEPS;
-          NCCLCHECK(ncclProxySharedBuffersGetP2p(sub->connector->comm, 0, 0, sub->channel->id, sharedBuffSlot, s, &ptr));
-          resources->recvMem->ptrsFifo[buffSlot] = ptr;
-          __sync_synchronize();
-          volatile uint64_t* sendHead = &resources->sendMem->head;
-          sub->posted += args->sliceSteps;
-          *sendHead = sub->base + sub->posted - NCCL_STEPS;
-        } else sub->posted += args->sliceSteps;
+        sub->posted += args->sliceSteps;
         args->idle = 0;
         continue;
       }
@@ -363,20 +339,12 @@ ncclResult_t netRecvProxy(struct ncclProxyArgs* args) {
       int stepSize = sub->connector->comm->buffSizes[p] / NCCL_STEPS;
       char* localBuff = sub->connector->conn.buffs[p];
       int buffSize = stepSize*args->sliceSteps;
-      if (resources->shared) buffSize /= SENDRECV_SLICEFACTOR;
       if (sub->recvbytes < buffSize) buffSize = sub->recvbytes;
 
       if ((sub->posted < sub->done + NCCL_STEPS) && (sub->posted < sub->nsteps)) {
         int buffSlot = (sub->base+sub->posted)%NCCL_STEPS;
         char* ptr;
-        if (resources->shared) {
-          int sharedBuffSlot = sub->posted%NCCL_STEPS;
-          NCCLCHECK(ncclProxySharedBuffersGetP2p(sub->connector->comm, 0, 1, sub->channel->id, sharedBuffSlot, s, &ptr));
-          volatile void** ptrsFifo = (volatile void**)resources->recvMem->ptrsFifo;
-          ptrsFifo[buffSlot] = ptr;
-        } else {
-          ptr = localBuff+buffSlot*stepSize;
-        }
+        ptr = localBuff+buffSlot*stepSize;
         NCCLCHECK(ncclNetIrecv(resources->netRecvComm, ptr, buffSize, mhandle, sub->requests+buffSlot));
         if (sub->requests[buffSlot] != NULL) {
           TRACE(NCCL_NET, "recvProxy [%ld/%d] posted recv request %p", sub->posted, buffSlot, sub->requests[buffSlot]);

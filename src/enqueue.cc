@@ -124,7 +124,7 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
       NCCLCHECK(getNextOp(channel, &w, NULL));
       struct ncclWorkElem* e = w->elems;
       e->comm = comm->devComm;
-      e->funcIndex = FUNC_INDEX_P2P;
+      printf("DANGER DANGER DANGER 2\n");
       e->p2p.nThreads = 0;
     }
     channel->workFifo[(channel->workFifoTail-1)%NCCL_MAX_OPS].elems[0].active = 2;
@@ -139,7 +139,7 @@ static ncclResult_t setupLaunch(struct ncclQueueInfo* eqInfo, int usingCudaGraph
         memcpy(&comm->args, elem, sizeof(struct ncclWorkElem));
       }
       // As we inline the first coll directly, we can free it immediately.
-      if (elem->funcIndex != FUNC_INDEX_P2P) elem->active = 0;
+      elem->active = 0;
     }
   }
 
@@ -604,83 +604,6 @@ static int getSegment(int delta, struct ncclWork* work) {
   return -1;
 }
 
-static ncclResult_t computeP2pWorkElem(struct ncclInfo* info /* input */, struct ncclWorkElem* elem /* output */) {
-  elem->comm = info->comm->devComm;
-  elem->funcIndex = FUNC_INDEX_P2P;
-  elem->nThreads = NCCL_MAX_NTHREADS;
-  elem->sendbuff = info->sendbuff;
-  elem->recvbuff = info->recvbuff;
-  elem->p2p.sendCount = info->sendbytes;
-  elem->p2p.recvCount = info->recvbytes;
-  elem->p2p.sendChunkSize = info->sendChunkSize;
-  elem->p2p.recvChunkSize = info->recvChunkSize;
-  elem->p2p.delta = info->delta;
-  return ncclSuccess;
-}
-
-static ncclResult_t enqueueP2pOp(struct ncclWorkElem* elem /* input */, struct ncclWork* work, int s) {
-  // Copy element into corresponding segment of ncclWork
-  memcpy(work->elems+s, elem, sizeof(struct ncclWorkElem));
-
-  // Determine nThreads at dynamic time
-  const int nsegments = s+1;
-  int nThreads = 512;
-  while (nsegments*nThreads > 512) nThreads /= 2;
-  if (nThreads >= 128) nThreads += WARP_SIZE;
-  for (int i=0; i<nsegments; i++) work->elems[i].p2p.nThreads = nThreads;
-
-  return ncclSuccess;
-}
-
-ncclResult_t ncclEnqueueP2pKernel(struct ncclComm* comm, struct ncclQueueElem* eqElem) {
-  struct ncclWorkElem* workElem = &eqElem->work;
-  struct ncclProxyArgs* proxyArgs = &eqElem->proxyArgs;
-
-  // Try to reuse last p2p operation if not full yet
-  struct ncclChannel* channel = proxyArgs->subs[0].channel;
-  int opIndex = (channel->workFifoTail-1+NCCL_MAX_OPS)%NCCL_MAX_OPS;
-  struct ncclWork* w = channel->workFifo+opIndex;
-  int segment = -1;
-  if (channel->workCount && w->elems[0].funcIndex == FUNC_INDEX_P2P && w->elems[NCCL_MAX_WORK_ELEMENTS-1].p2p.nThreads == 0) {
-    // Try to pack more segments into a single operation
-    segment = getSegment(workElem->p2p.delta, w);
-  }
-  if (segment == -1) {
-    NCCLCHECK(getNextOp(channel, &w, NULL));
-    segment = 0;
-  }
-
-  // store work element into FIFO
-  NCCLCHECK(ncclProxySaveP2p(comm, proxyArgs));
-  NCCLCHECK(enqueueP2pOp(workElem, w, segment));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclSetupP2pKernel(struct ncclInfo* info) {
-  ncclComm* comm = info->comm;
-  // Compute cuda kernel arg and proxy arg templates
-  struct ncclQueueElem* eqElem;
-  NCCLCHECK(ncclAddQueueElem(comm->enqueueInfo, &eqElem));
-  // The proxy code will set and tune the send/recv chunk size, make sure to run it first.
-  NCCLCHECK(ncclProxyComputeP2p(info, &eqElem->proxyArgs));
-  NCCLCHECK(computeP2pWorkElem(info, &eqElem->work));
-
-  int channelId = info->channelId;
-  struct cudaLaunchParams* params = comm->myParams;
-  params->gridDim.x = std::max<unsigned>(params->gridDim.x, channelId+1);
-  params->blockDim.x = std::max<unsigned>(params->blockDim.x, eqElem->work.nThreads);
-  comm->enqueueInfo->maxChannels = params->gridDim.x;  // params may be varied by a second graph hence we need to capture it here
-
-  // Record the first kernel to launch
-  // Just for CUDA kernel to know this is a P2P operation
-  // The CUDA kernel does not use the inlined first work element as fastpath argument
-  if (params->func == NULL) {
-    params->func = ncclKerns[eqElem->work.funcIndex];
-    memcpy(&comm->args, &eqElem->work, sizeof(struct ncclWorkElem));
-  }
-  return ncclSuccess;
-}
-
 template<int USING_CUDA_GRAPH>
 void CUDART_CB ncclEnqueueHostSetup(void* arg) {
   ncclResult_t ret;
@@ -690,11 +613,7 @@ void CUDART_CB ncclEnqueueHostSetup(void* arg) {
   // Iterate through the element list
   struct ncclQueueElem* eqElem = eqInfo->elemList.head;
   while (eqElem != eqInfo->elemList.tail) { // The queue always has one extra element
-    if (eqElem->work.funcIndex == FUNC_INDEX_P2P) {
-      NCCLCHECKGOTO(ncclEnqueueP2pKernel(comm, eqElem), ret, cb_end);
-    } else {
-      NCCLCHECKGOTO(ncclEnqueueCollKernel(comm, eqElem), ret, cb_end);
-    }
+    NCCLCHECKGOTO(ncclEnqueueCollKernel(comm, eqElem), ret, cb_end);
     eqElem = eqElem->next;
   }
 
@@ -785,11 +704,7 @@ ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
         info->opName, info->comm->opCount, info->sendbuff, info->recvbuff, info->count,
         info->datatype, info->op, info->root, info->comm, info->comm->nRanks, info->stream);
 
-    if (info->coll == ncclFuncSendRecv) { //p2p stored separately
-      NCCLCHECKGOTO(ncclSaveP2p(info), ret, end);
-    } else {
-      NCCLCHECKGOTO(ncclSaveAsyncColl(info), ret, end);
-    }
+    NCCLCHECKGOTO(ncclSaveAsyncColl(info), ret, end);
 end:
     if (savedDev != -1) CUDACHECK(cudaSetDevice(savedDev));
     ncclAsyncErrCheck(ret);

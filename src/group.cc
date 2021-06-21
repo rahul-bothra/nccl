@@ -115,19 +115,6 @@ ncclResult_t ncclGroupStart() {
   return ncclSuccess;
 }
 
-static ncclResult_t scheduleSendRecv(struct ncclComm* comm, int delta, int channelId, ssize_t recvbytes, void* recvbuff, ssize_t sendbytes, const void* sendbuff) {
-  struct ncclInfo info = { ncclFuncSendRecv, "SendRecv",
-    sendbuff, recvbuff, (size_t)std::max<ssize_t>(sendbytes,recvbytes), ncclInt8, ncclSum, -1, comm, comm->userStream, /* Args */
-    1, 1 };
-  info.delta = delta;
-  info.channelId = channelId;
-  info.sendbytes = sendbytes;
-  info.recvbytes = recvbytes;
-  if (delta == 0 && sendbytes != recvbytes) return ncclInvalidUsage;
-  NCCLCHECK(ncclSetupP2pKernel(&info));
-  return ncclSuccess;
-}
-
 void* ncclAsyncThreadPreconnect(void* args_) {
   struct ncclAsyncArgs* args = (struct ncclAsyncArgs*)args_;
   struct ncclComm* comm = args->coll.comm;
@@ -242,43 +229,7 @@ sched_delta:
           struct ncclP2Pinfo* recv = p2pRecvs[from].head;
           struct ncclP2Pinfo* send = p2pSends[to].head;
           if (recv != NULL || send != NULL) {
-            ssize_t totRecvBytes = -1, totSendBytes = -1;
-            if (recv != NULL) totRecvBytes = recv->nbytes;
-            if (send != NULL) totSendBytes = send->nbytes;
-            ssize_t recvChunkSize = getP2pChunkSize(totRecvBytes, nChannelsMin, nChannelsMax, stepSize, SENDRECV_SLICEFACTOR*stepSize);
-            ssize_t sendChunkSize = getP2pChunkSize(totSendBytes, nChannelsMin, nChannelsMax, stepSize, SENDRECV_SLICEFACTOR*stepSize);
-
-            ssize_t sendOffset = 0;
-            ssize_t recvOffset = 0;
-            int sendRemaining = 1, recvRemaining = 1;
-            int chunk = 0;
-            do {
-              int channelId = (delta+comm->p2pChannels[chunk%comm->p2pnChannelsPerPeer]) % comm->p2pnChannels;
-              ssize_t recvbytes = totRecvBytes-recvOffset;
-              ssize_t sendbytes = totSendBytes-sendOffset;
-              if (recvbytes > recvChunkSize) { recvbytes = recvChunkSize; } else { recvRemaining = 0; }
-              if (sendbytes > sendChunkSize) { sendbytes = sendChunkSize; } else { sendRemaining = 0; }
-              // 0-bytes send/recv are considered as syncs. Make sure we only add syncs when requested
-              // (total size == 0), otherwise set size to -1 so that the kernel skips the operation.
-              if (sendbytes == 0 && totSendBytes != 0) sendbytes = -1;
-              if (recvbytes == 0 && totRecvBytes != 0) recvbytes = -1;
-              if (sendbytes >= 0 || recvbytes >= 0) {
-                NCCLCHECKGOTO(scheduleSendRecv(comm, delta, channelId,
-                      recvbytes, recv ? ((char*)(recv->buff)) + recvOffset : NULL,
-                      sendbytes, send ? ((const char*)(send->buff)) + sendOffset : NULL), ret, group_cleanup);
-              }
-              recvOffset += recvChunkSize;
-              sendOffset += sendChunkSize;
-              chunk++;
-            } while (sendRemaining || recvRemaining);
-            if (recv) {
-              NCCLCHECKGOTO(dequeueP2pInfo(p2pRecvs+from), ret, group_cleanup);
-              comm->p2pRecvCount--;
-            }
-            if (send) {
-              NCCLCHECKGOTO(dequeueP2pInfo(p2pSends+to), ret, group_cleanup);
-              comm->p2pSendCount--;
-            }
+            printf("DANGER DANGER DANGER 1\n");
           }
           index++;
           if (index == 1 && deltas[1] == deltas[0]) index++;
