@@ -714,19 +714,6 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
   graph->nChannels = 0;
   graph->sameChannels = 1;
 
-  char* str = getenv("NCCL_GRAPH_FILE");
-  if (str) {
-    INFO(NCCL_ENV, "NCCL_GRAPH_FILE set by environment to %s", str);
-    struct ncclXml* xml;
-    NCCLCHECK(ncclCalloc(&xml, 1));
-    NCCLCHECK(ncclTopoGetXmlGraphFromFile(str, xml));
-    int nChannels;
-    NCCLCHECK(ncclTopoGetGraphFromXml(xml->nodes, system, graph, &nChannels));
-    INFO(NCCL_GRAPH, "Search %d : %d channels loaded from XML graph", graph->id, nChannels);
-    free(xml);
-    if (graph->nChannels > 0) return ncclSuccess;
-  }
-
   if (ngpus == 1) if (graph->pattern != NCCL_TOPO_PATTERN_RING) graph->pattern = NCCL_TOPO_PATTERN_TREE;
 
   // SPLIT_TREE works better on older archs.
@@ -881,19 +868,6 @@ ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGr
       offset = strlen(line);
     }
     INFO(NCCL_GRAPH, "%s", line);
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, struct ncclTopoGraph** graphs) {
-  char* str = getenv("NCCL_GRAPH_DUMP_FILE");
-  if (str) {
-    INFO(NCCL_ENV, "NCCL_GRAPH_DUMP_FILE set by environment to %s", str);
-    struct ncclXml* xml;
-    NCCLCHECK(ncclCalloc(&xml, 1));
-    NCCLCHECK(ncclTopoGetXmlFromGraphs(ngraphs, graphs, system, xml));
-    NCCLCHECK(ncclTopoDumpXmlToFile(str, xml));
-    free(xml);
   }
   return ncclSuccess;
 }

@@ -497,11 +497,6 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* comm
   NCCLCHECK(ncclTopoCompute(comm->topo, &treeGraph));
   NCCLCHECK(ncclTopoPrintGraph(comm->topo, &treeGraph));
 
-  if (comm->rank == ncclParamGraphDumpFileRank()) {
-    struct ncclTopoGraph* graphs[NCCL_NUM_ALGORITHMS] = { &ringGraph, &treeGraph };
-    NCCLCHECK(ncclTopoDumpGraphs(comm->topo, NCCL_NUM_ALGORITHMS, graphs));
-  }
-
   // AllGather3 - begin
   struct ncclGraphInfo {
     int pattern;

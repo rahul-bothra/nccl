@@ -209,40 +209,6 @@ ncclResult_t xmlLoadSub(FILE* file, struct ncclXml* xml, struct ncclXmlNode* hea
   }
 }
 
-/**************/
-/* XML Writer */
-/**************/
-
-ncclResult_t ncclTopoDumpXmlRec(int indent, FILE* file, struct ncclXmlNode* node) {
-  for (int i=0; i<indent; i++) fprintf(file, " ");
-  fprintf(file, "<%s", node->name);
-
-  for (int a=0; a<node->nAttrs; a++) {
-    fprintf(file, " %s=\"%s\"", node->attrs[a].key, node->attrs[a].value);
-  }
-  if (node->nSubs == 0) {
-    fprintf(file, "/>\n");
-  } else {
-    fprintf(file, ">\n");
-    for (int s=0; s<node->nSubs; s++) {
-      NCCLCHECK(ncclTopoDumpXmlRec(indent+2, file, node->subs[s]));
-    }
-    for (int i=0; i<indent; i++) fprintf(file, " ");
-    fprintf(file, "</%s>\n", node->name);
-  }
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoDumpXmlToFile(const char* xmlTopoFile, struct ncclXml* xml) {
-  FILE* file = fopen(xmlTopoFile, "w");
-  if (file == NULL) {
-    WARN("Unable to open %s, not dumping topology.", xmlTopoFile);
-    return ncclSuccess;
-  }
-  NCCLCHECK(ncclTopoDumpXmlRec(0, file, xml->nodes));
-  fclose(file);
-  return ncclSuccess;
-}
 
 /****************************************/
 /* Parser rules for our specific format */
@@ -294,18 +260,6 @@ ncclResult_t ncclTopoXmlLoadSystem(FILE* file, struct ncclXml* xml, struct ncclX
   return ncclSuccess;
 }
 
-ncclResult_t ncclTopoGetXmlFromFile(const char* xmlTopoFile, struct ncclXml* xml) {
-  FILE* file = fopen(xmlTopoFile, "r");
-  if (file == NULL) {
-    WARN("Could not open XML topology file %s : %s", xmlTopoFile, strerror(errno));
-    return ncclSuccess;
-  }
-  struct xmlHandler handlers[] = { { "system", ncclTopoXmlLoadSystem } };
-  xml->maxIndex = 0;
-  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
-  fclose(file);
-  return ncclSuccess;
-}
 
 /**********************/
 /* XML creation       */
@@ -682,61 +636,5 @@ ncclResult_t ncclTopoTrimXmlRec(struct ncclXmlNode* node) {
 }
 ncclResult_t ncclTopoTrimXml(struct ncclXml* xml) {
   NCCLCHECK(ncclTopoTrimXmlRec(xml->nodes));
-  return ncclSuccess;
-}
-
-/**************************************************/
-/* Parser rules for the user-defined graph search */
-/**************************************************/
-
-ncclResult_t ncclTopoXmlGraphLoadGpu(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
-  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoXmlGraphLoadNet(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
-  NCCLCHECK(xmlLoadSub(file, xml, head, NULL, 0));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoXmlGraphLoadChannel(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
-  struct xmlHandler handlers[] = { { "net", ncclTopoXmlGraphLoadNet }, { "gpu", ncclTopoXmlGraphLoadGpu } };
-  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 2));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoXmlGraphLoadGraph(FILE* file, struct ncclXml* xml, struct ncclXmlNode* head) {
-  struct xmlHandler handlers[] = { { "channel", ncclTopoXmlGraphLoadChannel } };
-  NCCLCHECK(xmlLoadSub(file, xml, head, handlers, 1));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoXmlGraphLoadGraphs(FILE* file, struct ncclXml* xmlGraph, struct ncclXmlNode* head) {
-  int version;
-  NCCLCHECK(xmlGetAttrInt(head, "version", &version));
-  if (version != NCCL_GRAPH_XML_VERSION) {
-    WARN("XML Graph has wrong version %d, %d needed", version, NCCL_GRAPH_XML_VERSION);
-    return ncclInvalidUsage;
-  }
-  const char* name;
-  NCCLCHECK(xmlGetAttr(head, "name", &name));
-  if (name != NULL) INFO(NCCL_GRAPH, "Loading graphs for topology %s", name);
-  else INFO(NCCL_GRAPH, "Loading graphs");
-
-  struct xmlHandler handlers[] = { { "graph", ncclTopoXmlGraphLoadGraph } };
-  NCCLCHECK(xmlLoadSub(file, xmlGraph, head, handlers, 1));
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoGetXmlGraphFromFile(const char* xmlGraphFile, struct ncclXml* xml) {
-  FILE* file = fopen(xmlGraphFile, "r");
-  if (file == NULL) {
-    WARN("Could not open XML graph file %s : %s", xmlGraphFile, strerror(errno));
-    return ncclSystemError;
-  }
-  struct xmlHandler handlers[] = { { "graphs", ncclTopoXmlGraphLoadGraphs } };
-  xml->maxIndex = 0;
-  NCCLCHECK(xmlLoadSub(file, xml, NULL, handlers, 1));
-  fclose(file);
   return ncclSuccess;
 }

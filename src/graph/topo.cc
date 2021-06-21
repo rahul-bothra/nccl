@@ -517,11 +517,6 @@ static ncclResult_t xmlInitAttrUint64(struct ncclXmlNode* node, const char* attr
 ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** system) {
   struct ncclXml* xml;
   NCCLCHECK(ncclCalloc(&xml, 1));
-  char* xmlTopoFile = getenv("NCCL_TOPO_FILE");
-  if (xmlTopoFile) {
-    INFO(NCCL_ENV, "NCCL_TOPO_FILE set by environment to %s", xmlTopoFile);
-    NCCLCHECK(ncclTopoGetXmlFromFile(xmlTopoFile, xml));
-  }
   if (xml->maxIndex == 0) {
     // Create top tag
     struct ncclXmlNode* top;
@@ -561,12 +556,6 @@ ncclResult_t ncclTopoGetSystem(struct ncclComm* comm, struct ncclTopoSystem** sy
 
   // Remove XML branches which don't have a node with keep="1" (typically when importing a topology)
   NCCLCHECK(ncclTopoTrimXml(xml));
-
-  xmlTopoFile = getenv("NCCL_TOPO_DUMP_FILE");
-  if (xmlTopoFile && comm->rank == ncclParamTopoDumpFileRank()) {
-    INFO(NCCL_ENV, "NCCL_TOPO_DUMP_FILE set by environment to %s", xmlTopoFile);
-    NCCLCHECK(ncclTopoDumpXmlToFile(xmlTopoFile, xml));
-  }
 
   NCCLCHECK(ncclTopoGetSystemFromXml(xml, system));
   free(xml);
