@@ -391,8 +391,6 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
 }
 
 NCCL_PARAM(CrossNic, "CROSS_NIC", 2);
-NCCL_PARAM(GraphDumpFileRank, "GRAPH_DUMP_FILE_RANK", 0);
-
 static ncclResult_t initTransportsRank(struct ncclComm* comm, ncclUniqueId* commId) {
   // We use 2 AllGathers
   // 1. { peerInfo, comm, compCap}
