@@ -23,23 +23,10 @@ ncclResult_t bootstrapNetInit() {
   if (bootstrapNetInitDone == 0) {
     pthread_mutex_lock(&bootstrapNetLock);
     if (bootstrapNetInitDone == 0) {
-      char* env = getenv("NCCL_COMM_ID");
-      if (env) {
-        union socketAddress remoteAddr;
-        if (GetSocketAddrFromString(&remoteAddr, env) != ncclSuccess) {
-          WARN("Invalid NCCL_COMM_ID, please use format: <ipv4>:<port> or [<ipv6>]:<port> or <hostname>:<port>");
-          return ncclInvalidArgument;
-        }
-        if (findInterfaceMatchSubnet(bootstrapNetIfName, &bootstrapNetIfAddr, &remoteAddr, MAX_IF_NAME_SIZE, 1) <= 0) {
-          WARN("NET/Socket : No usable listening interface found");
-          return ncclSystemError;
-        }
-      } else {
-        int nIfs = findInterfaces(bootstrapNetIfName, &bootstrapNetIfAddr, MAX_IF_NAME_SIZE, 1);
-        if (nIfs <= 0) {
-          WARN("Bootstrap : no socket interface found");
-          return ncclInternalError;
-        }
+      int nIfs = findInterfaces(bootstrapNetIfName, &bootstrapNetIfAddr, MAX_IF_NAME_SIZE, 1);
+      if (nIfs <= 0) {
+        WARN("Bootstrap : no socket interface found");
+        return ncclInternalError;
       }
       char line[SOCKET_NAME_MAXLEN+MAX_IF_NAME_SIZE+2];
       sprintf(line, " %s:", bootstrapNetIfName);
@@ -162,17 +149,8 @@ ncclResult_t bootstrapGetUniqueId(ncclUniqueId* id) {
   memset(id, 0, sizeof(ncclUniqueId));
   union socketAddress* connectAddr = (union socketAddress*) id;
 
-  char* env = getenv("NCCL_COMM_ID");
-  if (env) {
-    INFO(NCCL_ENV, "NCCL_COMM_ID set by environment to %s", env);
-    if (GetSocketAddrFromString(connectAddr, env) != ncclSuccess) {
-      WARN("Invalid NCCL_COMM_ID, please use format: <ipv4>:<port> or [<ipv6>]:<port> or <hostname>:<port>");
-      return ncclInvalidArgument;
-    }
-  } else {
-    memcpy(id, &bootstrapNetIfAddr, sizeof(union socketAddress));
-    NCCLCHECK(bootstrapCreateRoot(id, false));
-  }
+  memcpy(id, &bootstrapNetIfAddr, sizeof(union socketAddress));
+  NCCLCHECK(bootstrapCreateRoot(id, false));
 
   return ncclSuccess;
 }

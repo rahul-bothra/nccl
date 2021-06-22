@@ -298,21 +298,6 @@ static int findInterfaces(char* ifNames, union socketAddress *ifAddrs, int ifNam
     if (shownIfName++ == 0) INFO(NCCL_NET, "NCCL_SOCKET_IFNAME set to %s", env);
     nIfs = findInterfaces(env, ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   } else {
-    // Try to automatically pick the right one
-    // Start with IB
-    nIfs = findInterfaces("ib", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
-    // else see if we can get some hint from COMM ID
-    if (nIfs == 0) {
-      char* commId = getenv("NCCL_COMM_ID");
-      if (commId && strlen(commId) > 1) {
-	INFO(NCCL_ENV, "NCCL_COMM_ID set by environment to %s", commId);
-	// Try to find interface that is in the same subnet as the IP in comm id
-        union socketAddress idAddr;
-        GetSocketAddrFromString(&idAddr, commId);
-        nIfs = findInterfaceMatchSubnet(ifNames, ifAddrs, &idAddr, ifNameMaxSize, maxIfs);
-      }
-    }
-    // Then look for anything else (but not docker or lo)
     if (nIfs == 0) nIfs = findInterfaces("^docker,lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
     // Finally look for docker, then lo.
     if (nIfs == 0) nIfs = findInterfaces("docker", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
