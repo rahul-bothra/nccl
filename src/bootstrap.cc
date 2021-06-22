@@ -107,7 +107,6 @@ static void *bootstrapRoot(void* args) {
   NCCLCHECKGOTO(ncclCalloc(&zero, 1), res, out);
   setFilesLimit();
 
-  TRACE(NCCL_INIT, "BEGIN");
   /* Receive addresses from all ranks */
   do {
     int tmpFd;
@@ -121,16 +120,6 @@ static void *bootstrapRoot(void* args) {
       NCCLCHECKGOTO(ncclCalloc(&rankAddressesRoot, nranks), res, out);
     }
 
-    if (nranks != info.nranks) {
-      WARN("Bootstrap Root : mismatch in rank count from procs %d : %d", nranks, info.nranks);
-      goto out;
-    }
-
-    if (memcmp(zero, &rankAddressesRoot[info.rank], sizeof(union socketAddress)) != 0) {
-      WARN("Bootstrap Root : rank %d of %d ranks has already checked in", info.rank, nranks);
-      goto out;
-    }
-
     // Save the connection handle for that rank
     memcpy(rankAddressesRoot+info.rank, &info.extAddressListenRoot, sizeof(union socketAddress));
     memcpy(rankAddresses+info.rank, &info.extAddressListen, sizeof(union socketAddress));
@@ -138,7 +127,6 @@ static void *bootstrapRoot(void* args) {
     ++c;
     TRACE(NCCL_INIT, "Received connect from rank %d total %d/%d",  info.rank, c, nranks);
   } while (c < nranks);
-  TRACE(NCCL_INIT, "COLLECTED ALL %d HANDLES", nranks);
 
   // Send the connect handle for the next rank in the AllGather ring
   for (int r=0; r<nranks; ++r) {

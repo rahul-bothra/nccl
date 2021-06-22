@@ -2,3 +2,5 @@
 /build
 *.gcov
 /coverage/
+nccl_2.9.9-1+cuda11.2_amd64.build
+nccl_2.9.9-1+cuda11.2_amd64.changes
