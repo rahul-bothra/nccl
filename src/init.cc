@@ -361,7 +361,6 @@ ncclResult_t ncclCommSetIntra(struct ncclComm* comm, int rank, int ranks, struct
 #define DEFAULT_BUFFSIZE (1 << 22) /* 4MiB */
 
 static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
-  int64_t envs[NCCL_NUM_PROTOCOLS] = { ncclParamBuffSize() };
   int defaults[NCCL_NUM_PROTOCOLS] = { DEFAULT_BUFFSIZE };
 
   for (int p=0; p<NCCL_NUM_PROTOCOLS; p++) {
