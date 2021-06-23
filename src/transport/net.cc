@@ -10,6 +10,23 @@
 #include "collectives.h"
 #include "gdrwrap.h"
 
+#include <chrono>
+#define LOG_TIME(str, ...) printf("%lld " str "\n", std::chrono::high_resolution_clock::now(), ##__VA_ARGS__)
+
+struct ncclSocketRequest {
+  int channel;
+  uint64_t args_done;
+  int op;
+  void* data;
+  int size;
+  int ctrlFd;
+  int offset;
+  int used;
+  struct ncclSocketComm* comm;
+  struct ncclSocketTask* tasks[64];
+  int nSubs;
+};
+
 struct netConnectInfo {
   ncclNetHandle_t netHandle;
 };
@@ -302,6 +319,7 @@ ncclResult_t netSendProxy(struct ncclProxyArgs* args) {
       // Round to next multiple of sliceSteps
       sub->base = ROUNDUP(resources->step, args->chunkSteps);
       sub->posted = sub->transmitted = sub->done = 0;
+      sub->ready_for_done = -1;
     }
     args->state = ncclProxyOpProgress;
   }
@@ -331,6 +349,7 @@ ncclResult_t netSendProxy(struct ncclProxyArgs* args) {
           sub->posted += args->sliceSteps;
           *sendHead = sub->base + sub->posted - NCCL_STEPS;
         } else sub->posted += args->sliceSteps;
+        LOG_TIME("%d Post-done %d", sub->channel->id, sub->posted);
         args->idle = 0;
         continue;
       }
@@ -376,6 +395,9 @@ ncclResult_t netSendProxy(struct ncclProxyArgs* args) {
               // Make sure size is reset to zero before we update the head.
               __sync_synchronize();
               sub->transmitted += args->sliceSteps;
+              LOG_TIME("%d NetISend(+sync)-done %d", sub->channel->id, sub->transmitted);
+              ((struct ncclSocketRequest*)sub->requests[buffSlot])->channel = sub->channel->id;
+              ((struct ncclSocketRequest*)sub->requests[buffSlot])->args_done = sub->transmitted;
               args->idle = 0;
               continue;
             }
@@ -384,12 +406,17 @@ ncclResult_t netSendProxy(struct ncclProxyArgs* args) {
       }
       // Check whether the network has completed some send operations.
       if (sub->done < sub->transmitted) {
+        if(sub->ready_for_done != sub->done){
+          LOG_TIME("%d NetTest-start %d", sub->channel->id, sub->done + args->sliceSteps);
+          sub->ready_for_done = sub->done;
+        }
         int done;
         int buffSlot = (sub->base+sub->done)%NCCL_STEPS;
         NCCLCHECK(ncclNetTest(sub->requests[buffSlot], &done, NULL));
         if (done) {
           TRACE(NCCL_NET, "sendProxy [%ld/%d] request %p done", sub->done, buffSlot, sub->requests[buffSlot]);
           sub->done += args->sliceSteps;
+          LOG_TIME("%d NetTest-done %d", sub->channel->id, sub->done);
 
           if (resources->shared == 0) {
             resources->sendMem->head = sub->base + sub->done;
@@ -417,6 +444,7 @@ ncclResult_t netRecvProxy(struct ncclProxyArgs* args) {
       // Round to next multiple of sliceSteps
       sub->base = ROUNDUP(resources->step, args->chunkSteps);
       sub->posted = sub->received = sub->transmitted = sub->done = 0;
+      sub->ready_for_done = -1;
     }
     args->state = ncclProxyOpProgress;
   }
@@ -449,6 +477,9 @@ ncclResult_t netRecvProxy(struct ncclProxyArgs* args) {
         if (sub->requests[buffSlot] != NULL) {
           TRACE(NCCL_NET, "recvProxy [%ld/%d] posted recv request %p", sub->posted, buffSlot, sub->requests[buffSlot]);
           sub->posted += args->sliceSteps;
+          LOG_TIME("%d Post-done %d", sub->channel->id, sub->posted);
+          ((struct ncclSocketRequest*)sub->requests[buffSlot])->channel = sub->channel->id;
+          ((struct ncclSocketRequest*)sub->requests[buffSlot])->args_done = sub->posted;
           args->idle = 0;
           continue;
         }
@@ -456,30 +487,15 @@ ncclResult_t netRecvProxy(struct ncclProxyArgs* args) {
       if (sub->posted > sub->received) {
         int buffSlot = (sub->base+sub->received)%NCCL_STEPS;
         int done, size;
+        if(sub->ready_for_done != sub->received){
+          LOG_TIME("%d receive-start %d", sub->channel->id, sub->received + args->sliceSteps);
+          sub->ready_for_done = sub->received;
+        }
         NCCLCHECK(ncclNetTest(sub->requests[buffSlot], &done, &size));
         if (done) {
           sub->received += args->sliceSteps;
-          if (size > 0 && p == NCCL_PROTO_SIMPLE && resources->useGdr) {
-            // Don't pass data to the GPU yet, flush first.
-
-            // GDRCOPY support
-            if (resources->devFlushMem) {
-#if defined (__x86_64__)
-              // Force a PCI-E read from GPU memory
-              asm volatile ("mov (%0), %%eax" :: "l"(resources->devFlushMem) : "%eax");
-#else
-              WARN("NET: GDR Flush only supported on x86_64");
-              return ncclInternalError;
-#endif
-              sub->requests[buffSlot] = NULL;
-            } else {
-              volatile void** ptrsFifo = (volatile void**)resources->recvMem->ptrsFifo;
-              char* ptr = resources->shared ? (char*)(ptrsFifo[buffSlot]) : localBuff+buffSlot*stepSize;
-              NCCLCHECK(ncclNetIflush(resources->netRecvComm, ptr, size, mhandle, sub->requests+buffSlot));
-            }
-          } else {
-            sub->requests[buffSlot] = NULL;
-          }
+          LOG_TIME("%d receive-done %d (useGdr: %d)", sub->channel->id, sub->received, resources->useGdr);
+          sub->requests[buffSlot] = NULL;
           args->idle = 0;
           continue;
         }
@@ -499,6 +515,7 @@ ncclResult_t netRecvProxy(struct ncclProxyArgs* args) {
           } else {
             resources->recvMem->tail = sub->base + sub->transmitted;
           }
+          LOG_TIME("%d transmit-done %d", sub->channel->id, sub->transmitted);
           args->idle = 0;
           continue;
         }

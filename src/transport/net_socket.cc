@@ -16,6 +16,9 @@
 #include <limits.h>
 #include <fcntl.h>
 
+#include <chrono>
+#define LOG_TIME(str, ...) printf("%lld " str "\n", std::chrono::high_resolution_clock::now(), ##__VA_ARGS__)
+
 /* Init functions */
 static int ncclNetIfs = -1;
 struct ncclSocketDev {
@@ -135,6 +138,8 @@ struct ncclSocketTask {
 };
 
 struct ncclSocketRequest {
+  int channel;
+  uint64_t args_done;
   int op;
   void* data;
   int size;
@@ -144,6 +149,7 @@ struct ncclSocketRequest {
   struct ncclSocketComm* comm;
   struct ncclSocketTask* tasks[MAX_SOCKETS];
   int nSubs;
+  int nCompleted;
 };
 
 struct ncclSocketTaskQueue {
@@ -422,6 +428,7 @@ ncclResult_t ncclSocketTest(void* request, int* done, int* size) {
     r->offset = 0;
     r->used = 2; // done exchanging size
     // divide into subtasks
+    r->nCompleted = 0;
     int chunkOffset = 0, i = 0;
     if (r->comm->nSocks > 0) {
       // each request can be divided up to nSocks tasks
@@ -433,6 +440,7 @@ ncclResult_t ncclSocketTest(void* request, int* done, int* size) {
       }
     }
     r->nSubs = i;
+    LOG_TIME("%d size-exchange-done %d", r->channel, r->args_done);
   }
   if (r->used == 2) { // already exchanged size
     if (r->nSubs > 0) {
@@ -442,6 +450,10 @@ ncclResult_t ncclSocketTest(void* request, int* done, int* size) {
         if (sub->result != ncclSuccess) return sub->result;
         if (sub->offset == sub->size) nCompleted++;
       }
+      // if(nCompleted != r->nCompleted){
+      //   LOG_TIME("%d netTestPartial-%d %d", r->channel, nCompleted, r->args_done);
+      //   r->nCompleted = nCompleted;
+      // }
       if (nCompleted == r->nSubs) {
         if (size) *size = r->size;
         *done = 1;

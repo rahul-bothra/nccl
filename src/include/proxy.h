@@ -32,6 +32,7 @@ struct ncclProxySubArgs {
   uint64_t posted;
   uint64_t received;
   uint64_t flushed;
+  uint64_t ready_for_done;
   uint64_t transmitted;
   uint64_t done;
   uint64_t end;
