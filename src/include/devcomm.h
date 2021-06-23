@@ -152,6 +152,7 @@ struct CollectiveArgs {
       uint32_t root;
       size_t count;
       size_t lastChunkSize;
+      uint64_t* timestamps;
     } coll;
     struct {
       uint16_t nThreads;

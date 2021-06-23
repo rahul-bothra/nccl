@@ -214,6 +214,10 @@ __device__ void ncclAllReduceRingLLKernel(struct CollectiveArgs* args) {
   const int nranks = comm->nRanks;
   const ssize_t loopSize = nChannels*nranks*chunkSize;
   const ssize_t size = args->coll.count;
+  if(tid == 0){
+    uint64_t* timestamps = args->coll.timestamps;
+    timestamps[0] = 32;
+  }
 
   ncclLLPrimitives<T, FUNC, 1, 1> LLprims(tid, nthreads, &ring->prev, &ring->next, stepLines, channel, comm);
 

@@ -355,6 +355,7 @@ static ncclResult_t computeColl(struct ncclInfo* info /* input */, struct ncclCo
   coll->args.coll.count = info->count;
   coll->args.coll.nChannels = info->nChannels;
   coll->args.coll.nThreads = info->nThreads;
+  cudaMalloc(&(coll->args.coll.timestamps), 3*sizeof(uint64_t));
 
   coll->funcIndex = FUNC_INDEX(info->coll, info->op, info->datatype, info->algorithm, info->protocol);
 

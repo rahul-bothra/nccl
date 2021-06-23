@@ -280,6 +280,10 @@ ncclResult_t ncclGroupEnd() {
     if (args->funcType == ASYNC_FUNC_COLL) {
       CUDACHECKGOTO(cudaSetDevice(args->coll.comm->cudaDev), ret, end);
       NCCLCHECKGOTO(ncclBarrierEnqueueWait(args->coll.comm), ret, end);
+      uint64_t* timestamps_h = (uint64_t*)malloc(3*sizeof(uint64_t));
+      cudaMemcpy(timestamps_h, args->coll.comm->args.args.coll.timestamps, 3*sizeof(uint64_t), cudaMemcpyDeviceToHost);
+      cudaFree(args->coll.comm->args.args.coll.timestamps);
+      printf("Value: %d\n", timestamps_h[0]);
     }
   }
   for (int i=0; i<ncclGroupIndex; i++) {
