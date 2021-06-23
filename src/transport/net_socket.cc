@@ -140,7 +140,6 @@ struct ncclSocketRequest {
   int op;
   void* data;
   int size;
-  int ctrlFd;
   int offset;
   int used;
   struct ncclSocketComm* comm;
@@ -171,7 +170,6 @@ struct ncclSocketListenComm {
 };
 
 struct ncclSocketComm {
-  int ctrlFd;
   int fds[MAX_SOCKETS];
   int nSocks;
   int nThreads;
@@ -197,7 +195,7 @@ void* persistentSocketThread(void *args_) {
         for (int j=0; j<nSocksPerThread; j++) {
           struct ncclSocketTask* r = myQueue->tasks+i+j;
           if (r != NULL && r->used == 1 && r->offset < r->size) {
-            r->result = socketProgress(r->op, r->fd, r->data, r->size, &r->offset);
+            r->result = socketUDPProgress(r->op, r->fd, r->data, r->size, &r->offset);
             if (r->result != ncclSuccess) {
               WARN("NET/Socket : socket progress error");
               return NULL;
@@ -276,7 +274,6 @@ ncclResult_t ncclSocketNewListenComm(struct ncclSocketListenComm** comm) {
 
 ncclResult_t ncclSocketNewComm(struct ncclSocketComm** comm) {
   NCCLCHECK(ncclCalloc(comm, 1));
-  (*comm)->ctrlFd = -1;
   for (int i=0; i < MAX_SOCKETS; i++) {
     (*comm)->fds[i] = -1;
   }
@@ -293,7 +290,7 @@ ncclResult_t ncclSocketListen(int dev, void* opaqueHandle, void** listenComm) {
   struct ncclSocketListenComm* comm;
   NCCLCHECK(ncclSocketNewListenComm(&comm));
   NCCLCHECK(GetSocketAddr(dev, &handle->connectAddr));
-  NCCLCHECK(createListenSocket(&comm->fd, &handle->connectAddr));
+  NCCLCHECK(createListenUDPSocket(&comm->fd, &handle->connectAddr)); // Do some action here
   NCCLCHECK(ncclSocketGetNsockNthread(dev, &comm->nSocks, &comm->nThreads));
   handle->nSocks = comm->nSocks;
   handle->nThreads = comm->nThreads;
@@ -310,12 +307,11 @@ ncclResult_t ncclSocketConnect(int dev, void* opaqueHandle, void** sendComm) {
   struct ncclSocketHandle* handle = (struct ncclSocketHandle*) opaqueHandle;
   comm->nSocks = handle->nSocks;
   comm->nThreads = handle->nThreads;
-  for (int i=0; i<comm->nSocks+1; i++) {
+  for (int i=0; i<comm->nSocks; i++) {
     int tmpFd, offset=0;
-    NCCLCHECK(connectAddress(&tmpFd, &handle->connectAddr));
-    NCCLCHECK(socketWait(NCCL_SOCKET_SEND, tmpFd, &i, sizeof(int), &offset));
-    if (i == comm->nSocks) comm->ctrlFd = tmpFd;
-    else comm->fds[i] = tmpFd;
+    NCCLCHECK(connectUDPAddress(&tmpFd, &handle->connectAddr));
+    NCCLCHECK(socketUDPWait(NCCL_SOCKET_SEND, tmpFd, &i, sizeof(int), &offset));
+    comm->fds[i] = tmpFd;
   }
   *sendComm = comm;
   return ncclSuccess;
@@ -327,14 +323,13 @@ ncclResult_t ncclSocketAccept(void* listenComm, void** recvComm) {
   NCCLCHECK(ncclSocketNewComm(&rComm));
   rComm->nSocks = lComm->nSocks;
   rComm->nThreads = lComm->nThreads;
-  for (int i=0; i<rComm->nSocks+1; i++) {
+  for (int i=0; i<rComm->nSocks; i++) {
     int tmpFd, sendSockIdx, offset=0;
     struct sockaddr_in sockaddr;
     socklen_t socklen = sizeof(struct sockaddr_in);
     SYSCHECKVAL(accept(lComm->fd, (struct sockaddr*)&sockaddr, &socklen), "accept", tmpFd);
-    NCCLCHECK(socketWait(NCCL_SOCKET_RECV, tmpFd, &sendSockIdx, sizeof(int), &offset));
-    if (sendSockIdx == rComm->nSocks) rComm->ctrlFd = tmpFd;
-    else rComm->fds[sendSockIdx] = tmpFd;
+    NCCLCHECK(socketUDPWait(NCCL_SOCKET_RECV, tmpFd, &sendSockIdx, sizeof(int), &offset));
+    rComm->fds[sendSockIdx] = tmpFd;
   }
   *recvComm = rComm;
   return ncclSuccess;
@@ -347,7 +342,6 @@ ncclResult_t ncclSocketGetRequest(struct ncclSocketComm* comm, int op, void* dat
       r->op = op;
       r->data = data;
       r->size = size;
-      r->ctrlFd = comm->ctrlFd;
       r->used = 1;
       r->comm = comm;
       r->nSubs = 0;
@@ -406,21 +400,6 @@ ncclResult_t ncclSocketTest(void* request, int* done, int* size) {
     return ncclInternalError;
   }
   if (r->used == 1) { /* try to send/recv size */
-    int data = r->size;
-    int offset = 0;
-    NCCLCHECK(socketProgress(r->op, r->ctrlFd, &data, sizeof(int), &offset));
-
-    if (offset == 0) return ncclSuccess; /* Not ready -- retry later */
-
-    // Not sure we could ever receive less than 4 bytes, but just in case ...
-    if (offset < sizeof(int)) NCCLCHECK(socketWait(r->op, r->ctrlFd, &data, sizeof(int), &offset));
-
-    // Check size is less or equal to the size provided by the user
-    if (r->op == NCCL_SOCKET_RECV && data > r->size) {
-      WARN("NET/Socket : message truncated : receiving %d bytes instead of %d", data, r->size);
-      return ncclInternalError;
-    }
-    r->size = data;
     r->offset = 0;
     r->used = 2; // done exchanging size
     // divide into subtasks
@@ -437,30 +416,19 @@ ncclResult_t ncclSocketTest(void* request, int* done, int* size) {
     r->nSubs = i;
   }
   if (r->used == 2) { // already exchanged size
-    if (r->nSubs > 0) {
-      int nCompleted = 0;
+    int nCompleted = 0;
+    for (int i=0; i<r->nSubs; i++) {
+      struct ncclSocketTask* sub = r->tasks[i];
+      if (sub->result != ncclSuccess) return sub->result;
+      if (sub->offset == sub->size) nCompleted++;
+    }
+    if (nCompleted == r->nSubs) {
+      if (size) *size = r->size;
+      *done = 1;
+      r->used = 0;
       for (int i=0; i<r->nSubs; i++) {
         struct ncclSocketTask* sub = r->tasks[i];
-        if (sub->result != ncclSuccess) return sub->result;
-        if (sub->offset == sub->size) nCompleted++;
-      }
-      if (nCompleted == r->nSubs) {
-        if (size) *size = r->size;
-        *done = 1;
-        r->used = 0;
-        for (int i=0; i<r->nSubs; i++) {
-          struct ncclSocketTask* sub = r->tasks[i];
-          sub->used = 0;
-        }
-      }
-    } else { // progress request using main thread
-      if (r->offset < r->size) {
-        NCCLCHECK(socketProgress(r->op, r->ctrlFd, r->data, r->size, &r->offset));
-      }
-      if (r->offset == r->size) {
-        if (size) *size = r->size;
-        *done = 1;
-        r->used = 0;
+        sub->used = 0;
       }
     }
   }
@@ -512,7 +480,6 @@ ncclResult_t ncclSocketClose(void* opaqueComm) {
       }
       free(res->threadTaskQueue.tasks);
     }
-    if (comm->ctrlFd != -1) close(comm->ctrlFd);
     for (int i=0; i<comm->nSocks; i++) {
       if (comm->fds[i] != -1) close(comm->fds[i]);
     }
