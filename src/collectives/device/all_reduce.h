@@ -4,9 +4,41 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include <stdio.h>
+#include <inttypes.h>
+#include <chrono>
+
 #include "devcomm.h"
 #include "primitives.h"
 #include "collectives.h"
+
+
+#define FORMATS_2(identifier) identifier " " identifier " "
+#define FORMATS_4(identifier) FORMATS_2(identifier) FORMATS_2(identifier)
+#define FORMATS_8(identifier) FORMATS_4(identifier) FORMATS_4(identifier)
+#define FORMATS_16(identifier) FORMATS_8(identifier) FORMATS_8(identifier)
+#define FORMATS_32(identifier) FORMATS_16(identifier) FORMATS_16(identifier)
+#define FORMATS_64(identifier) FORMATS_32(identifier) FORMATS_32(identifier)
+#define FORMATS_128(identifier) FORMATS_64(identifier) FORMATS_64(identifier)
+#define FORMATS_256(identifier) FORMATS_128(identifier) FORMATS_128(identifier)
+#define FORMATS_512(identifier) FORMATS_256(identifier) FORMATS_256(identifier)
+
+#define EXPAND_ARRAY_2(arr, index) arr[index + 1] - arr[index], arr[index + 2] - arr[index + 1]
+#define EXPAND_ARRAY_4(arr, index) EXPAND_ARRAY_2(arr, index), EXPAND_ARRAY_2(arr, index + 2) 
+#define EXPAND_ARRAY_8(arr, index) EXPAND_ARRAY_4(arr, index), EXPAND_ARRAY_4(arr, index + 4) 
+#define EXPAND_ARRAY_16(arr, index) EXPAND_ARRAY_8(arr, index), EXPAND_ARRAY_8(arr, index + 8) 
+#define EXPAND_ARRAY_32(arr, index) EXPAND_ARRAY_16(arr, index), EXPAND_ARRAY_16(arr, index + 16) 
+#define EXPAND_ARRAY_64(arr, index) EXPAND_ARRAY_32(arr, index), EXPAND_ARRAY_32(arr, index + 32) 
+#define EXPAND_ARRAY_128(arr, index) EXPAND_ARRAY_64(arr, index), EXPAND_ARRAY_64(arr, index + 64) 
+#define EXPAND_ARRAY_256(arr, index) EXPAND_ARRAY_128(arr, index), EXPAND_ARRAY_128(arr, index + 128) 
+#define EXPAND_ARRAY_512(arr, index) EXPAND_ARRAY_256(arr, index), EXPAND_ARRAY_256(arr, index + 256) 
+
+#define FORMATS_N(n, identifier) FORMATS_##n(identifier)
+#define EXPAND_ARRAY_N(n, arr) EXPAND_ARRAY_##n(arr, 0)
+
+#define LOG_TIME(variable) variable = clock64(); 
+#define LOG_ITER_TIME(variable, loopIter) if(threadIdx.x == 0 && loopIter == 0){variable = clock64();} 
+
 
 template<class FUNC, typename T, int UNROLL>
 class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T, UNROLL> {
@@ -25,6 +57,15 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T
     const ssize_t loopSize = nChannels*(ssize_t)chunkSize;
     const ssize_t size = args->coll.count;
 
+    int nIters = 1 + ((size - 1) / (nranks*loopSize));
+
+    clock_t kernelStartTime;
+    clock_t kernelEndTime;
+    clock_t scatterReduceTimes[10][5];
+    clock_t allGatherTimes[10][5];
+
+    LOG_TIME(kernelStartTime);
+
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
     T * __restrict__ thisOutput = (T*)args->recvbuff;
@@ -32,7 +73,8 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T
     ncclPrimitives<UNROLL, ALLREDUCE_CHUNKSTEPS/ALLREDUCE_SLICESTEPS, ALLREDUCE_SLICESTEPS, T, 1, 1, 1, FUNC>
       prims(tid, nthreads, &ring->prev, &ring->next, thisOutput, stepSize, channel, comm, ncclShmem->ptrs, 0);
 
-    for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += nranks*loopSize) {
+    int curr_iter = 0;
+    for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += nranks*loopSize, curr_iter++) {
       ssize_t realChunkSize = min(chunkSize, DIVUP(size-gridOffset,nranks*nChannels));
       ALIGN_SIZE(realChunkSize, nthreads*sizeof(uint64_t)/sizeof(T));
       ssize_t chunkOffset = gridOffset + bid*nranks*realChunkSize;
@@ -42,12 +84,16 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T
       int nelem;
       int chunk;
 
+      LOG_TIME(scatterReduceTimes[curr_iter][0]);
+
       // step 0: push data to next GPU
       chunk = ring->devUserRanks[nranks-1];
       offset = chunkOffset + chunk * realChunkSize;
       nelem = min(realChunkSize, size-offset);
 
       prims.send(thisInput+offset, nelem);
+
+      LOG_TIME(scatterReduceTimes[curr_iter][1]);
 
       // k-2 steps: reduce and copy to next GPU
       for (int j=2; j<nranks; ++j) {
@@ -56,6 +102,8 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T
         nelem = min(realChunkSize, size-offset);
 
         prims.recvReduceSend(thisInput+offset, nelem);
+        
+        LOG_TIME(scatterReduceTimes[curr_iter][j]);
       }
 
       // step k-1: reduce this buffer and data, which will produce the final
@@ -66,6 +114,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T
 
       prims.directRecvReduceCopySend(thisInput+offset, thisOutput+offset, offset, nelem);
 
+      LOG_TIME(scatterReduceTimes[curr_iter][nranks]);
+      LOG_TIME(allGatherTimes[curr_iter][0]);
+
       // k-2 steps: copy to next GPU
       for (int j=1; j<nranks-1; ++j) {
         chunk = ring->devUserRanks[nranks-j];
@@ -73,6 +124,7 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T
         nelem = min(realChunkSize, size-offset);
 
         prims.directRecvCopySend(thisOutput+offset, offset, nelem);
+        LOG_TIME(allGatherTimes[curr_iter][j]);
       }
 
       // Make final copy from buffer to dest.
@@ -82,7 +134,53 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE, FUNC, T
 
       // Final wait/copy.
       prims.directRecv(thisOutput+offset, offset, nelem);
+      LOG_TIME(allGatherTimes[curr_iter][nranks - 1]);
+      LOG_TIME(allGatherTimes[curr_iter][nranks]);
     }
+
+    LOG_TIME(kernelEndTime);
+
+    if(tid == 0){
+      if (nIters == 1){
+        printf("RingSimple %d %d %" PRIu64 " %d %" PRId64 \
+          "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+          "\n%" PRIu64 " " FORMATS_4("%" PRIu64) "\n\n", \
+          bid, nthreads, kernelEndTime - kernelStartTime, nIters, size*sizeof(T), \
+          scatterReduceTimes[0][nranks] - scatterReduceTimes[0][0], EXPAND_ARRAY_4(scatterReduceTimes[0], 0), \
+          allGatherTimes[0][nranks] - allGatherTimes[0][0], EXPAND_ARRAY_4(allGatherTimes[0], 0));
+      }
+      else if(nIters == 2){
+          printf("RingSimple %d %d %" PRIu64 " %d %" PRId64 \
+          "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+          "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+          "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+          "\n%" PRIu64 " " FORMATS_4("%" PRIu64) "\n\n", \
+          bid, nthreads, kernelEndTime - kernelStartTime, nIters, size*sizeof(T), \
+          scatterReduceTimes[0][nranks] - scatterReduceTimes[0][0], EXPAND_ARRAY_4(scatterReduceTimes[0], 0), \
+          allGatherTimes[0][nranks] - allGatherTimes[0][0], EXPAND_ARRAY_4(allGatherTimes[0], 0), \
+          scatterReduceTimes[1][nranks] - scatterReduceTimes[1][0], EXPAND_ARRAY_4(scatterReduceTimes[1], 0), \
+          allGatherTimes[1][nranks] - allGatherTimes[1][0], EXPAND_ARRAY_4(allGatherTimes[1], 0) \
+          );
+      }
+      else{
+          printf("RingSimple %d %d %" PRIu64 " %d %" PRId64 \
+            "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+            "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+            "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+            "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+            "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+            "\n%" PRIu64 " " FORMATS_4("%" PRIu64) "\n\n", \
+            bid, nthreads, kernelEndTime - kernelStartTime, nIters, size*sizeof(T), \
+            scatterReduceTimes[0][nranks] - scatterReduceTimes[0][0], EXPAND_ARRAY_4(scatterReduceTimes[0], 0), \
+            allGatherTimes[0][nranks] - allGatherTimes[0][0], EXPAND_ARRAY_4(allGatherTimes[0], 0), \
+            scatterReduceTimes[1][nranks] - scatterReduceTimes[1][0], EXPAND_ARRAY_4(scatterReduceTimes[1], 0), \
+            allGatherTimes[1][nranks] - allGatherTimes[1][0], EXPAND_ARRAY_4(allGatherTimes[1], 0), \
+            scatterReduceTimes[2][nranks] - scatterReduceTimes[2][0], EXPAND_ARRAY_4(scatterReduceTimes[2], 0), \
+            allGatherTimes[2][nranks] - allGatherTimes[2][0], EXPAND_ARRAY_4(allGatherTimes[2], 0) \
+          );
+      }
+    }
+
   }
 };
 
@@ -106,6 +204,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_SIMPLE, FUNC, T
     if (loopSize > size) {
       chunkSize = DIVUP(size, nChannels*minChunkSize)*minChunkSize;
     }
+
+    if(tid == 0)
+      printf("** Tree Simple %d %d %" PRIu64 " \n\n", bid, nthreads, size);
 
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
@@ -217,6 +318,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_COLLNET, NCCL_PROTO_SIMPLE, FUNC
       chunkSize = DIVUP(size, nChannels*minChunkSize)*minChunkSize;
     }
 
+    if(tid == 0)
+      printf("** CollNet Simple %d %d %" PRIu64 " \n\n", bid, nthreads, size);
+
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
     T * __restrict__ thisOutput = (T*)args->recvbuff;
@@ -275,13 +379,22 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL, FUNC, T, UN
     const ssize_t loopSize = nChannels*nranks*chunkSize;
     const ssize_t size = args->coll.count;
 
+    int nIters = 1 + ((size - 1) / (nranks*loopSize));
+    clock_t kernelStartTime;
+    clock_t kernelEndTime;
+    clock_t scatterReduceTimes[10][5];
+    clock_t allGatherTimes[10][5];
+
+    LOG_TIME(kernelStartTime);
+
     ncclLLPrimitives<T, FUNC, 1, 1> LLprims(tid, nthreads, &ring->prev, &ring->next, stepLines, channel, comm);
 
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
     T * __restrict__ thisOutput = (T*)args->recvbuff;
 
-    for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += loopSize) {
+    int curr_iter = 0;
+    for (ssize_t gridOffset = 0; gridOffset < size; gridOffset += nranks*loopSize, curr_iter++) {
       chunkSize = min(DIVUP(size-gridOffset, nChannels*nranks*minChunkSize)*minChunkSize, chunkSize);
 
       /////////////// begin AllReduce steps ///////////////
@@ -289,12 +402,15 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL, FUNC, T, UN
       int nelem;
       int chunk;
 
+      LOG_TIME(scatterReduceTimes[curr_iter][0]);
       // step 0: push data to next GPU
       chunk = ring->devUserRanks[nranks-1];
       offset = gridOffset + (chunk*nChannels+bid) * chunkSize;
       nelem = min(chunkSize, size-offset);
 
       LLprims.send(thisInput+offset, nelem);
+
+      LOG_TIME(scatterReduceTimes[curr_iter][1]);
 
       // k-2 steps: reduce and copy to next GPU
       for (int j=2; j<nranks; ++j) {
@@ -303,6 +419,7 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL, FUNC, T, UN
         nelem = min(chunkSize, size-offset);
 
         LLprims.recvReduceSend(thisInput+offset, nelem);
+        LOG_TIME(scatterReduceTimes[curr_iter][j]);
       }
 
       // step k-1: reduce this buffer and data, which will produce the final
@@ -313,6 +430,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL, FUNC, T, UN
 
       LLprims.recvReduceCopySend(thisInput+offset, thisOutput+offset, nelem);
 
+      LOG_TIME(scatterReduceTimes[curr_iter][nranks]);
+      LOG_TIME(allGatherTimes[curr_iter][0]);
+
       // k-2 steps: copy to next GPU
       for (int j=1; j<nranks-1; ++j) {
         chunk = ring->devUserRanks[nranks-j];
@@ -320,6 +440,7 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL, FUNC, T, UN
         nelem = min(chunkSize, size-offset);
 
         LLprims.recvCopySend(thisOutput+offset, nelem);
+        LOG_TIME(allGatherTimes[curr_iter][j]);
       }
 
       // Make final copy from buffer to dest.
@@ -329,7 +450,21 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL, FUNC, T, UN
 
       // Here we need to copy from buffer to this output.
       LLprims.recv(thisOutput+offset, nelem);
+      LOG_TIME(allGatherTimes[curr_iter][nranks - 1]);
+      LOG_TIME(allGatherTimes[curr_iter][nranks]);
     }
+
+    LOG_TIME(kernelEndTime);
+
+    if(tid == 0){
+      printf("RingLL %d %d %" PRIu64 " %d %" PRId64 \
+        "\n%" PRIu64 " " FORMATS_4("%" PRIu64) \
+        "\n%" PRIu64 " " FORMATS_4("%" PRIu64) "\n\n", \
+        bid, nthreads, kernelEndTime - kernelStartTime, nIters, size*sizeof(T), \
+        scatterReduceTimes[0][nranks] - scatterReduceTimes[0][0], EXPAND_ARRAY_4(scatterReduceTimes[0], 0), \
+        allGatherTimes[0][nranks] - allGatherTimes[0][0], EXPAND_ARRAY_4(allGatherTimes[0], 0));
+    }
+
   }
 };
 
@@ -353,6 +488,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL, FUNC, T, UN
     if (loopSize > size) {
       chunkSize = DIVUP(size, nChannels*minChunkSize)*minChunkSize;
     }
+
+    if(tid == 0)
+      printf("** Tree LL %d %d %" PRIu64 " \n\n", bid, nthreads, size);
 
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
@@ -415,6 +553,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_COLLNET, NCCL_PROTO_LL, FUNC, T,
       chunkSize = DIVUP(size, nChannels*minChunkSize)*minChunkSize;
     }
 
+    if(tid == 0)
+      printf("** CollNet LL %d %d %" PRIu64 " \n\n", bid, nthreads, size);
+
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
     T * __restrict__ thisOutput = (T*)args->recvbuff;
@@ -474,6 +615,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_RING, NCCL_PROTO_LL128, FUNC, T,
     const ssize_t size = args->coll.count;
 
     ncclLL128Primitives<T, FUNC, 1, 1> LLprims(tid, nthreads, &ring->prev, &ring->next, stepSize, channel, comm);
+
+    if(tid == 0)
+      printf("** Ring LL128 %d %d %" PRIu64 " \n\n", bid, nthreads, size);
 
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
@@ -552,6 +696,9 @@ class ncclFunction<ncclFuncAllReduce, NCCL_ALGO_TREE, NCCL_PROTO_LL128, FUNC, T,
     if (loopSize > size) {
       chunkSize = DIVUP(size, nChannels*minChunkSize)*minChunkSize;
     }
+
+    if(tid == 0)
+      printf("** Tree LL128 %d %d %" PRIu64 " \n\n", bid, nthreads, size);
 
     // Compute pointers
     const T * __restrict__ thisInput = (const T*)args->sendbuff;
